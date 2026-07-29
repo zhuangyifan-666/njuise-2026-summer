@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test verify
+.PHONY: install lint typecheck test verify performance
 
 install:
 	python -m pip install -e ".[dev]"
@@ -13,3 +13,6 @@ test:
 	python -m pytest
 
 verify: lint typecheck test
+
+performance:
+	python -m pytest tests/performance -m performance -q

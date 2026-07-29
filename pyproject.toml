@@ -41,7 +41,8 @@ packages = ["src/repoproof"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --strict-config"
+addopts = "--strict-markers --strict-config -m 'not performance'"
+markers = ["performance: benchmark excluded from the default suite"]
 
 [tool.ruff]
 target-version = "py312"
