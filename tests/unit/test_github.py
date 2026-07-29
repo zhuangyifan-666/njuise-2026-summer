@@ -24,6 +24,19 @@ class _ChunkedBody(httpx.SyncByteStream):
             yield chunk
 
 
+class _SlowByteBody(httpx.SyncByteStream):
+    def __init__(self, payload: bytes, clock: list[float], chunks_read: list[int]) -> None:
+        self.payload = payload
+        self.clock = clock
+        self.chunks_read = chunks_read
+
+    def __iter__(self):
+        for number, value in enumerate(self.payload, start=1):
+            self.clock[0] += 1.0
+            self.chunks_read.append(number)
+            yield bytes((value,))
+
+
 def test_gateway_rejects_non_https_base_url() -> None:
     """Catches remote configuration that permits plaintext credential transport."""
     with pytest.raises(ValueError, match="HTTPS"):
@@ -36,7 +49,11 @@ def test_gateway_sends_token_only_in_authorization_header() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"default_branch": "main"}, request=request)
+        return httpx.Response(
+            200,
+            stream=_ChunkedBody((b'{"default_branch":"main"}',), []),
+            request=request,
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     gateway = GitHubGateway(FakeCredentials("canary-token"), client)
@@ -76,13 +93,49 @@ def test_gateway_stops_streaming_when_response_exceeds_its_byte_ceiling() -> Non
     gateway.close()
 
 
+def test_gateway_checks_deadline_after_every_raw_slow_drip_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches decoded chunk aggregation delaying the shared deadline check."""
+    canary = "github_pat_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    clock = [0.0]
+    chunks_read: list[int] = []
+    monkeypatch.setattr("repoproof.github.time.monotonic", lambda: clock[0])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            stream=_SlowByteBody(canary.encode() * 10, clock, chunks_read),
+            request=request,
+        )
+
+    gateway = GitHubGateway(
+        FakeCredentials(canary),
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        timeout_seconds=5.0,
+    )
+
+    with pytest.raises(GitHubRequestError) as caught:
+        gateway.repository("owner", "repo")
+
+    assert chunks_read == [1, 2, 3, 4, 5]
+    assert canary not in repr(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    gateway.close()
+
+
 def test_explicit_default_github_port_uses_public_api_origin() -> None:
     """Catches github.com:443 being misrouted to the enterprise API path."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"default_branch": "main"}, request=request)
+        return httpx.Response(
+            200,
+            stream=_ChunkedBody((b'{"default_branch":"main"}',), []),
+            request=request,
+        )
 
     gateway = GitHubGateway(
         FakeCredentials("canary-token"),

@@ -21,7 +21,6 @@ _REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,255}")
 _ACTIONS_STATUS = re.compile(r"[a-z_]{1,32}")
 _MAX_RESPONSE_BYTES = 1024 * 1024
-_RESPONSE_CHUNK_BYTES = 64 * 1024
 _MAX_READ_TIMEOUT_SECONDS = 1.0
 
 
@@ -199,6 +198,7 @@ class GitHubGateway:
                     headers = {
                         "Authorization": f"Bearer {token}",
                         "Accept": "application/vnd.github+json",
+                        "Accept-Encoding": "identity",
                     }
                     request_timeout = httpx.Timeout(
                         timeout,
@@ -213,7 +213,7 @@ class GitHubGateway:
                     ) as response:
                         within_limits = 200 <= response.status_code < 300
                         if within_limits:
-                            for chunk in response.iter_bytes(_RESPONSE_CHUNK_BYTES):
+                            for chunk in response.iter_raw():
                                 deadline_ok = self._remaining_timeout() > 0
                                 size_ok = len(body) + len(chunk) <= _MAX_RESPONSE_BYTES
                                 if not deadline_ok or not size_ok:
