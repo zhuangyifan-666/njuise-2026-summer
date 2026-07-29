@@ -6,6 +6,47 @@ import pytest
 from repoproof.reporting.output import atomic_write_text
 
 
+class _FailingHandle:
+    def __init__(
+        self,
+        descriptor: int,
+        *,
+        fail_write: bool = False,
+        fail_flush: bool = False,
+        fail_close: bool = False,
+    ) -> None:
+        self.descriptor = descriptor
+        self.fail_write = fail_write
+        self.fail_flush = fail_flush
+        self.fail_close = fail_close
+        self.closed = False
+
+    def write(self, content: str) -> int:
+        if self.fail_write:
+            raise KeyboardInterrupt("write interrupted")
+        return len(content)
+
+    def flush(self) -> None:
+        if self.fail_flush:
+            raise OSError("flush blocked")
+        return None
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            import os
+
+            os.close(self.descriptor)
+        if self.fail_close:
+            raise OSError("close blocked")
+
+    def __enter__(self) -> "_FailingHandle":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+
 def test_atomic_write_uses_utf8_lf_and_creates_parent_directory(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "report.json"
 
@@ -36,3 +77,82 @@ def test_interrupted_write_cleans_temp_and_does_not_create_target(tmp_path: Path
 
     assert not target.exists()
     assert list(tmp_path.glob(".report.html.*.tmp")) == []
+
+
+def test_write_failure_keeps_primary_interrupt_when_close_also_fails(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    target.write_text("old", encoding="utf-8")
+    captured: dict[str, int] = {}
+
+    import repoproof.reporting.output as output
+
+    real_mkstemp = output.tempfile.mkstemp
+
+    def record_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        descriptor, path = real_mkstemp(*args, **kwargs)
+        captured["descriptor"] = descriptor
+        return descriptor, path
+
+    with (
+        patch("repoproof.reporting.output.tempfile.mkstemp", side_effect=record_mkstemp),
+        patch(
+            "repoproof.reporting.output.os.fdopen",
+            side_effect=lambda descriptor, *args, **kwargs: _FailingHandle(
+                descriptor, fail_write=True, fail_close=True
+            ),
+        ),
+    ):
+        with pytest.raises(KeyboardInterrupt, match="write interrupted"):
+            atomic_write_text(target, "secret content must not leak")
+
+    with pytest.raises(OSError):
+        import os
+
+        os.fstat(captured["descriptor"])
+    assert target.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []
+
+
+def test_fdopen_failure_releases_raw_descriptor_and_temp(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    captured: dict[str, int] = {}
+
+    import repoproof.reporting.output as output
+
+    real_mkstemp = output.tempfile.mkstemp
+
+    def record_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        descriptor, path = real_mkstemp(*args, **kwargs)
+        captured["descriptor"] = descriptor
+        return descriptor, path
+
+    with (
+        patch("repoproof.reporting.output.tempfile.mkstemp", side_effect=record_mkstemp),
+        patch("repoproof.reporting.output.os.fdopen", side_effect=OSError("fdopen blocked")),
+    ):
+        with pytest.raises(OSError, match="fdopen blocked"):
+            atomic_write_text(target, "secret content must not leak")
+
+    with pytest.raises(OSError):
+        import os
+
+        os.fstat(captured["descriptor"])
+    assert not target.exists()
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []
+
+
+def test_flush_failure_preserves_its_error_and_cleans_temp(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    target.write_text("old", encoding="utf-8")
+
+    with patch(
+        "repoproof.reporting.output.os.fdopen",
+        side_effect=lambda descriptor, *args, **kwargs: _FailingHandle(
+            descriptor, fail_flush=True
+        ),
+    ):
+        with pytest.raises(OSError, match="flush blocked"):
+            atomic_write_text(target, "secret content must not leak")
+
+    assert target.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []
