@@ -12,7 +12,7 @@ def _descriptor_identity(descriptor: int) -> DescriptorIdentity | None:
     try:
         info = os.fstat(descriptor)
         return (info.st_dev, info.st_ino)
-    except BaseException:
+    except OSError:
         return None
 
 
@@ -20,8 +20,12 @@ def _close_descriptor(descriptor: int | None, identity: DescriptorIdentity | Non
     if descriptor is None:
         return
     try:
-        if identity is not None and _descriptor_identity(descriptor) != identity:
-            return
+        if identity is not None:
+            try:
+                if _descriptor_identity(descriptor) != identity:
+                    return
+            except BaseException:
+                return
         os.close(descriptor)
     except BaseException:
         return

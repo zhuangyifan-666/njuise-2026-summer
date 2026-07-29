@@ -211,3 +211,19 @@ def test_close_hook_fd_reuse_does_not_close_unrelated_reopened_file(tmp_path: Pa
             pass
     assert not target.exists()
     assert list(tmp_path.glob(".report.json.*.tmp")) == []
+
+
+def test_initial_descriptor_identity_interrupt_propagates_and_keeps_target(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    target.write_text("old", encoding="utf-8")
+
+    with (
+        patch("repoproof.reporting.output.os.fstat", side_effect=KeyboardInterrupt("stop")),
+        patch("repoproof.reporting.output.os.replace") as replace,
+    ):
+        with pytest.raises(KeyboardInterrupt, match="stop"):
+            atomic_write_text(target, "new")
+
+    assert target.read_text(encoding="utf-8") == "old"
+    replace.assert_not_called()
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []

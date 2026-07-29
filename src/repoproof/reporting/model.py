@@ -29,8 +29,8 @@ _SUMMARY_STATUSES = (
 )
 _OSC_ESCAPE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
 _CSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-_PRIVATE_KEY = re.compile(
-    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+_PEM_BEGIN = re.compile(
+    r"-----BEGIN (?P<label>(?:RSA |EC |OPENSSH )?PRIVATE KEY)-----",
     re.IGNORECASE,
 )
 _ASSIGNMENT_SECRET = re.compile(
@@ -73,8 +73,29 @@ def _normalize_controls(value: str) -> str:
     )
 
 
+def _redact_private_key_blocks(value: str) -> str:
+    """Replace complete or bounded-unterminated private-key PEM data as one safe value."""
+    redacted: list[str] = []
+    cursor = 0
+    while match := _PEM_BEGIN.search(value, cursor):
+        redacted.append(value[cursor : match.start()])
+        label = match.group("label")
+        end = re.search(rf"-----END {re.escape(label)}-----", value[match.end() :], re.IGNORECASE)
+        if end is None:
+            raw = value[match.start() :]
+            redacted.append(_redaction("private-key", raw))
+            cursor = len(value)
+            break
+        stop = match.end() + end.end()
+        raw = value[match.start() : stop]
+        redacted.append(_redaction("private-key", raw))
+        cursor = stop
+    redacted.append(value[cursor:])
+    return "".join(redacted)
+
+
 def _redact_secrets(value: str) -> str:
-    value = _PRIVATE_KEY.sub(lambda match: _redaction("private-key", match.group(0)), value)
+    value = _redact_private_key_blocks(value)
     value = _ASSIGNMENT_SECRET.sub(
         lambda match: f"{match.group('label')}={_redaction('credential', match.group('secret'))}",
         value,
@@ -87,9 +108,12 @@ def sanitize_text(value: object) -> str:
     """Return deterministic bounded text that contains no raw recognized secret or control code."""
     try:
         text = value if isinstance(value, str) else str(value)
-        text = _redact_secrets(_normalize_controls(text))
-        if len(text) > _MAX_TEXT_LENGTH:
-            return f"{text[:_MAX_TEXT_LENGTH]}<truncated:{_fingerprint(text)}>"
+        text = _normalize_controls(text)
+        truncated = len(text) > _MAX_TEXT_LENGTH
+        bounded = text[:_MAX_TEXT_LENGTH]
+        text = _redact_secrets(bounded)
+        if truncated:
+            return f"{text}<truncated:{_fingerprint(bounded)}>"
         return text
     except BaseException:
         return "<unavailable>"
@@ -109,14 +133,15 @@ def _sanitize_secret_scan_path(value: object) -> str:
         if part in {"/", "\\"}:
             sanitized.append(part)
             continue
-        stem, dot, suffix = part.rpartition(".")
-        entropy_candidate = stem if dot else part
         if part.casefold() in _SENSITIVE_SECRET_FILENAMES:
             sanitized.append(_redaction("path", part))
-        elif _has_high_entropy(entropy_candidate):
-            sanitized.append(f"{_redaction('path', entropy_candidate)}{dot}{suffix}")
         else:
-            sanitized.append(part)
+            sanitized.append(
+                ".".join(
+                    _redaction("path", segment) if _has_high_entropy(segment) else segment
+                    for segment in part.split(".")
+                )
+            )
     return "".join(sanitized)
 
 

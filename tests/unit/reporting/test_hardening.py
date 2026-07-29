@@ -258,3 +258,65 @@ def test_secret_scan_location_redacts_only_high_entropy_filename_component() -> 
     assert location.path.startswith("captures/")
     assert token_like_filename not in location.path
     assert "<redacted:path:" in location.path
+
+
+def test_private_key_blocks_and_hidden_secret_segments_do_not_reach_any_renderer() -> None:
+    pem_body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAAAAAABAAAAAEAAA=="
+    unterminated_body = "MIIEpAIBAAKCAQEAprivatebody"
+    private_key = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        f"{pem_body}\n"
+        "-----END OPENSSH PRIVATE KEY-----"
+    )
+    unterminated = f"-----BEGIN RSA PRIVATE KEY-----\n{unterminated_body}"
+    secret_segments = (
+        ".ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd",
+        "name.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd",
+    )
+    profile = Profile.model_validate(
+        {
+            "schema": 1,
+            "name": "private-project",
+            "description": "test profile",
+            "rules": [
+                {
+                    "id": "security.secrets",
+                    "type": "secret_scan",
+                    "severity": "error",
+                    "params": {"categories": ["private_key", "high_entropy"]},
+                    "remediation": "remove secret",
+                }
+            ],
+        }
+    )
+    report = build_report(
+        profile,
+        Path("repo"),
+        (
+            Finding(
+                "security.secrets",
+                FindingStatus.FAIL,
+                Severity.ERROR,
+                f"{private_key}\n{unterminated}",
+                tuple(Location(f"captures/{segment}", 1) for segment in secret_segments),
+                ("secrets:scan",),
+                "remove secret",
+            ),
+        ),
+        (),
+        {},
+        datetime(2026, 7, 29, tzinfo=UTC),
+    )
+
+    surfaces = (
+        repr(report),
+        repr(report_to_dict(report)),
+        render_console(report, color=False, verbose=True),
+        render_json(report),
+        render_html(report),
+    )
+    assert all(private_key not in surface and unterminated not in surface for surface in surfaces)
+    assert all(pem_body not in surface and unterminated_body not in surface for surface in surfaces)
+    assert all(segment not in repr(report) for segment in secret_segments)
+    assert report.profile_name == "private-project"
+    assert "<redacted:private-key:" in report.findings[0].message
