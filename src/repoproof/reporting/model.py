@@ -69,9 +69,6 @@ _TOKEN = re.compile(
     rf"sk-[A-Za-z0-9]{{16,{_MAX_CREDENTIAL_VALUE_LENGTH}}}|"
     r"AKIA[0-9A-Z]{16})(?![A-Za-z0-9_])"
 )
-_REDACTION_MARKER = re.compile(
-    r"<redacted:(?:credential|token|private-key|path):[0-9a-f]{8}>"
-)
 _HIGH_ENTROPY = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9_])")
 _SENSITIVE_SECRET_FILENAMES = frozenset({"id_rsa", "id_ed25519", ".env", "credentials.json"})
 _SecretSpan = tuple[int, int, str, str]
@@ -206,17 +203,7 @@ def normalize_console_text(value: object) -> str:
     """Make any display value one line and inert without altering safe report semantics."""
     try:
         text = value if isinstance(value, str) else str(value)
-        text = _normalize_controls(text)
-        if len(text) > _MAX_TEXT_LENGTH:
-            stop = _MAX_TEXT_LENGTH
-            for marker in _REDACTION_MARKER.finditer(text):
-                if marker.start() >= stop:
-                    break
-                if marker.end() > stop:
-                    stop = marker.end()
-                    break
-            return f"{text[:stop]}<truncated:{_fingerprint(text)}>"
-        return text
+        return _normalize_controls(text)
     except BaseException:
         return "<unavailable>"
 

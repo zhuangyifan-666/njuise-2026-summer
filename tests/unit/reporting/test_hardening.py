@@ -128,6 +128,29 @@ def test_verbose_renderers_decode_to_the_same_schema_payload() -> None:
     assert json.loads(html_parser.payload) == expected
 
 
+def test_marker_expansion_preserves_exact_message_across_semantic_surfaces() -> None:
+    message = "|".join(["token=" + ("A" * 20)] * 37) + "!!"
+    assert len(message) == 1_000
+    report = _report_with_message(message)
+    canonical_message = report.findings[0].message
+    html_parser = _PayloadBodyParser()
+    html_parser.feed(render_html(report))
+    assert html_parser.payload is not None
+
+    messages = (
+        canonical_message,
+        _message_from_payload(json.loads(render_json(report))),
+        _message_from_payload(json.loads(html_parser.payload)),
+        _message_from_payload(
+            _console_payload(render_console(report, color=False, verbose=True))
+        ),
+    )
+
+    assert len(canonical_message) == 1_148
+    assert canonical_message.count("<redacted:credential:") == 37
+    assert messages == (canonical_message,) * 4
+
+
 def test_console_normalizes_hostile_control_sequences_and_ignores_ambient_width(
     monkeypatch,
 ) -> None:
