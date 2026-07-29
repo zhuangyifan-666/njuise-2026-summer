@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from repoproof.domain import Finding, FindingStatus, Location, Severity
+from repoproof.domain import AuditReport, Finding, FindingStatus, Location, Severity
 from repoproof.profile.models import Profile
 from repoproof.reporting.console import render_console
 from repoproof.reporting.html_reporter import render_html
@@ -66,11 +66,54 @@ def _report():
     )
 
 
+def _report_with_message(message: str) -> AuditReport:
+    return build_report(
+        _profile(),
+        Path("demo-repository"),
+        (
+            Finding(
+                "docs.present",
+                FindingStatus.FAIL,
+                Severity.ERROR,
+                message,
+                (),
+                (),
+                "add README",
+            ),
+        ),
+        (),
+        {},
+        datetime(2026, 7, 29, tzinfo=UTC),
+    )
+
+
 def _console_payload(rendered: str) -> dict[str, object]:
     for line in rendered.splitlines():
         if line.startswith("semantic-json: "):
             return json.loads(line.removeprefix("semantic-json: "))
     raise AssertionError("console did not include a semantic payload")
+
+
+def _message_from_payload(payload: dict[str, object]) -> str:
+    findings = payload["findings"]
+    assert isinstance(findings, list)
+    finding = findings[0]
+    assert isinstance(finding, dict)
+    message = finding["message"]
+    assert isinstance(message, str)
+    return message
+
+
+def _messages_from_all_surfaces(report: AuditReport) -> tuple[str, ...]:
+    html_parser = _PayloadBodyParser()
+    html_parser.feed(render_html(report))
+    assert html_parser.payload is not None
+    return (
+        report.findings[0].message,
+        render_console(report, color=False, verbose=False),
+        _message_from_payload(json.loads(render_json(report))),
+        _message_from_payload(json.loads(html_parser.payload)),
+    )
 
 
 def test_verbose_renderers_decode_to_the_same_schema_payload() -> None:
@@ -377,3 +420,58 @@ def test_credentials_across_report_cutoff_leave_no_raw_fragment_in_any_surface(
     assert raw_prefix == "" or all(f"{filler}{raw_prefix}" not in item for item in surfaces)
     assert all(secret[:20] not in item and secret[-20:] not in item for item in surfaces)
     assert all(credential not in item for item in surfaces)
+
+
+def test_secret_replacements_preserve_raw_cutoff_in_every_report_surface() -> None:
+    assignments = "|".join(
+        f"password{' ' * 32}={' ' * 32}'{character * 255}"
+        for character in ("A", "B", "C")
+    )
+    raw_cutoff = f"{assignments}|SAFE-BOUND"
+    tail_token = "github_pat_" + ("R" * 255)
+    message = f"{raw_cutoff}{'~' * 300}{tail_token}"
+    assert len(assignments) == 989
+    assert len(raw_cutoff) == 1_000
+    assert message[1_300:] == tail_token
+
+    messages = _messages_from_all_surfaces(_report_with_message(message))
+
+    assert all("SAFE-BOUND" in item for item in messages)
+    assert all(tail_token[:30] not in item for item in messages)
+    assert all(
+        character * 20 not in item
+        for item in messages
+        for character in ("A", "B", "C")
+    )
+
+
+def test_boundary_overlapping_assignment_and_token_use_one_complete_redaction() -> None:
+    token = "ghp_" + ("O" * 251)
+    messages = _messages_from_all_surfaces(
+        _report_with_message(f"{'~' * 990}token={token}")
+    )
+    expected = "<redacted:credential:0d4b4e83>"
+
+    assert all(expected in item for item in messages)
+    assert all(item.count("<redacted:") == 1 for item in messages)
+    assert all("<redacted:token:" not in item for item in messages)
+    assert all("token=" not in item and "ghp_" not in item for item in messages)
+    assert all("O" * 20 not in item for item in messages)
+
+
+def test_boundary_private_key_uses_one_complete_redaction() -> None:
+    pem_body = "PEM_BOUNDARY_CANARY_BODY"
+    pem = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        f"{pem_body}\n"
+        "-----END RSA PRIVATE KEY-----"
+    )
+    messages = _messages_from_all_surfaces(
+        _report_with_message(f"{'~' * 990}{pem}")
+    )
+    expected = "<redacted:private-key:4f817529>"
+
+    assert all(expected in item for item in messages)
+    assert all(item.count("<redacted:") == 1 for item in messages)
+    assert all("BEGIN RSA" not in item and "END RSA" not in item for item in messages)
+    assert all(pem_body not in item for item in messages)

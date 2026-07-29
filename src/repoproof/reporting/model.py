@@ -69,8 +69,12 @@ _TOKEN = re.compile(
     rf"sk-[A-Za-z0-9]{{16,{_MAX_CREDENTIAL_VALUE_LENGTH}}}|"
     r"AKIA[0-9A-Z]{16})(?![A-Za-z0-9_])"
 )
+_REDACTION_MARKER = re.compile(
+    r"<redacted:(?:credential|token|private-key|path):[0-9a-f]{8}>"
+)
 _HIGH_ENTROPY = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9_])")
 _SENSITIVE_SECRET_FILENAMES = frozenset({"id_rsa", "id_ed25519", ".env", "credentials.json"})
+_SecretSpan = tuple[int, int, str, str]
 
 
 def _fingerprint(value: str) -> str:
@@ -100,35 +104,58 @@ def _normalize_controls(value: str) -> str:
     )
 
 
-def _redact_private_key_blocks(value: str) -> str:
-    """Replace complete or bounded-unterminated private-key PEM data as one safe value."""
-    redacted: list[str] = []
+def _private_key_spans(value: str) -> list[_SecretSpan]:
+    """Locate complete or bounded-unterminated private-key PEM data."""
+    spans: list[_SecretSpan] = []
     cursor = 0
     while match := _PEM_BEGIN.search(value, cursor):
-        redacted.append(value[cursor : match.start()])
         label = match.group("label")
         end = re.search(rf"-----END {re.escape(label)}-----", value[match.end() :], re.IGNORECASE)
         if end is None:
-            raw = value[match.start() :]
-            redacted.append(_redaction("private-key", raw))
-            cursor = len(value)
+            stop = len(value)
+            spans.append((match.start(), stop, "private-key", value[match.start() : stop]))
             break
         stop = match.end() + end.end()
-        raw = value[match.start() : stop]
-        redacted.append(_redaction("private-key", raw))
+        spans.append((match.start(), stop, "private-key", value[match.start() : stop]))
         cursor = stop
-    redacted.append(value[cursor:])
+    return spans
+
+
+def _overlaps_secret_span(start: int, stop: int, spans: Sequence[_SecretSpan]) -> bool:
+    return any(start < span_stop and span_start < stop for span_start, span_stop, _, _ in spans)
+
+
+def _secret_spans(value: str) -> list[_SecretSpan]:
+    """Locate prioritized, non-overlapping secret spans in original text coordinates."""
+    spans = _private_key_spans(value)
+    for match in _ASSIGNMENT_SECRET.finditer(value):
+        if not _overlaps_secret_span(match.start(), match.end(), spans):
+            spans.append(
+                (
+                    match.start(),
+                    match.end(),
+                    "credential",
+                    match.group("secret"),
+                )
+            )
+    for match in _TOKEN.finditer(value):
+        if not _overlaps_secret_span(match.start(), match.end(), spans):
+            spans.append((match.start(), match.end(), "token", match.group(0)))
+    return sorted(spans, key=lambda span: (span[0], span[1]))
+
+
+def _redact_prefix(value: str, stop: int) -> str:
+    """Render a source-coordinate prefix without letting replacements move its boundary."""
+    redacted: list[str] = []
+    cursor = 0
+    for start, end, kind, fingerprint_value in _secret_spans(value):
+        if start >= stop:
+            break
+        redacted.append(value[cursor:start])
+        redacted.append(_redaction(kind, fingerprint_value))
+        cursor = end
+    redacted.append(value[cursor:stop])
     return "".join(redacted)
-
-
-def _redact_secrets(value: str) -> str:
-    value = _redact_private_key_blocks(value)
-    value = _ASSIGNMENT_SECRET.sub(
-        lambda match: _redaction("credential", match.group("secret")),
-        value,
-    )
-    value = _TOKEN.sub(lambda match: _redaction("token", match.group(0)), value)
-    return value
 
 
 def sanitize_text(value: object) -> str:
@@ -137,14 +164,11 @@ def sanitize_text(value: object) -> str:
         raw = value if isinstance(value, str) else str(value)
         scan_was_bounded = len(raw) > _MAX_SANITIZER_SCAN_LENGTH
         text = _normalize_controls(raw[:_MAX_SANITIZER_SCAN_LENGTH])
-        redacted = _redact_secrets(text)
-        sanitized_was_truncated = (
-            len(text) > _MAX_TEXT_LENGTH or len(redacted) > _MAX_TEXT_LENGTH
-        )
-        truncated = scan_was_bounded or sanitized_was_truncated
+        redacted = _redact_prefix(text, min(len(text), _MAX_TEXT_LENGTH))
+        truncated = scan_was_bounded or len(text) > _MAX_TEXT_LENGTH
         if truncated:
             return (
-                f"{redacted[:_MAX_TEXT_LENGTH]}<truncated:"
+                f"{redacted}<truncated:"
                 f"{_fingerprint(text[:_MAX_TEXT_LENGTH])}>"
             )
         return redacted
@@ -184,7 +208,14 @@ def normalize_console_text(value: object) -> str:
         text = value if isinstance(value, str) else str(value)
         text = _normalize_controls(text)
         if len(text) > _MAX_TEXT_LENGTH:
-            return f"{text[:_MAX_TEXT_LENGTH]}<truncated:{_fingerprint(text)}>"
+            stop = _MAX_TEXT_LENGTH
+            for marker in _REDACTION_MARKER.finditer(text):
+                if marker.start() >= stop:
+                    break
+                if marker.end() > stop:
+                    stop = marker.end()
+                    break
+            return f"{text[:stop]}<truncated:{_fingerprint(text)}>"
         return text
     except BaseException:
         return "<unavailable>"
