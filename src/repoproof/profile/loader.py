@@ -16,14 +16,15 @@ MAX_ALIASES = 50
 
 def _read_profile(name_or_path: str) -> bytes:
     if name_or_path == "ai4se-b":
-        return files("repoproof.profile.builtin").joinpath("ai4se-b.yml").read_bytes()
-    path = Path(name_or_path)
-    try:
-        data = path.read_bytes()
-    except OSError as exc:
-        raise UsageFailure(
-            "Profile could not be read.", "Check --profile path and permissions."
-        ) from exc
+        data = files("repoproof.profile.builtin").joinpath("ai4se-b.yml").read_bytes()
+    else:
+        path = Path(name_or_path)
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise UsageFailure(
+                "Profile could not be read.", "Check --profile path and permissions."
+            ) from exc
     if len(data) > MAX_PROFILE_BYTES:
         raise UsageFailure("Profile exceeds 1 MiB.", "Reduce the YAML profile size.")
     return data

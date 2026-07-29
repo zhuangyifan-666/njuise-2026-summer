@@ -1,13 +1,15 @@
 import re
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
+    model_serializer,
     model_validator,
 )
 
@@ -138,6 +140,13 @@ class Profile(StrictModel):
     @property
     def schema(self) -> Literal[1]:  # type: ignore[override]
         return self.profile_schema
+
+    @model_serializer(mode="wrap")
+    def serialize_profile(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if "profile_schema" in data:
+            data["schema"] = data.pop("profile_schema")
+        return data
 
     @model_validator(mode="after")
     def unique_rule_ids(self) -> "Profile":
