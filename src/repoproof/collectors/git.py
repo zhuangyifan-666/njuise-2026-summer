@@ -53,11 +53,9 @@ def _bounded_join(reader: threading.Thread, deadline: float) -> None:
 
 
 def _cleanup_process(
-    process: subprocess.Popen[bytes], stream: IO[bytes] | None, reader: threading.Thread | None
+    process: subprocess.Popen[bytes], reader: threading.Thread | None
 ) -> None:
     deadline = time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
-    if stream is not None:
-        _ignore_cleanup_failure(stream.close)
     if process.returncode is None:
         _ignore_cleanup_failure(process.terminate)
         _bounded_wait(process, deadline)
@@ -86,17 +84,23 @@ class GitRunner:
         )
         stream = process.stdout
         if stream is None:
-            _cleanup_process(process, None, None)
+            _cleanup_process(process, None)
             raise RuntimeError("git command unavailable")
         output = bytearray()
         read_failed = [False]
-        reader = threading.Thread(
-            target=_read_bounded_output,
-            args=(stream, max_output, output, read_failed),
-            daemon=True,
-        )
-        reader.start()
+        reader: threading.Thread | None = None
         try:
+            try:
+                reader = threading.Thread(
+                    target=_read_bounded_output,
+                    args=(stream, max_output, output, read_failed),
+                    daemon=True,
+                )
+                reader.start()
+            except Exception:
+                raise RuntimeError("git command unavailable") from None
+            if reader is None:
+                raise RuntimeError("git command unavailable")
             process.wait(timeout=max(deadline - time.monotonic(), 0.0))
             reader.join(timeout=max(deadline - time.monotonic(), 0.0))
             if reader.is_alive():
@@ -105,8 +109,8 @@ class GitRunner:
                 raise RuntimeError("git command unavailable")
             return bytes(output).decode("utf-8", errors="replace").strip()
         finally:
-            if process.returncode is None or reader.is_alive():
-                _cleanup_process(process, stream, reader)
+            if process.returncode is None or reader is None or reader.is_alive():
+                _cleanup_process(process, reader)
 
 
 class _GitCommandRunner(Protocol):

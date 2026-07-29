@@ -187,3 +187,81 @@ def test_git_collector_sanitizes_reader_failures_without_thread_exception_output
     assert evidence.facts == {"reason": "git_unavailable_or_not_repository"}
     assert "private stream failure" not in repr(evidence)
     exception_hook.assert_not_called()
+
+
+class _CloseContentionProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.wait_timeouts: list[float] = []
+        self.stdout = _CloseContentionStream(self)
+
+    def wait(self, timeout: float | None = None) -> int:
+        if timeout is None:
+            raise AssertionError("unbounded wait")
+        self.wait_timeouts.append(timeout)
+        raise subprocess.TimeoutExpired("git", timeout)
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+
+class _CloseContentionStream:
+    def __init__(self, process: _CloseContentionProcess) -> None:
+        self.process = process
+        self.close_before_termination = False
+
+    def close(self) -> None:
+        if self.process.terminate_calls == 0:
+            self.close_before_termination = True
+            raise AssertionError("close contended with reader-held pipe lock")
+
+
+def test_git_runner_terminates_before_attempting_a_contended_pipe_close(tmp_path: Path) -> None:
+    """Catches cleanup that can block on stdout close before stopping the child process."""
+    process = _CloseContentionProcess()
+    _StuckReader.instances.clear()
+    with patch("repoproof.collectors.git.subprocess.Popen", return_value=process):
+        with patch("repoproof.collectors.git.threading.Thread", _StuckReader):
+            with pytest.raises(subprocess.TimeoutExpired):
+                GitRunner().run(tmp_path, ("status", "--short"), 0.0, 1024)
+
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.stdout.close_before_termination is False
+    assert all(0.0 <= timeout <= 1.0 for timeout in process.wait_timeouts)
+
+
+class _StartFailureReader:
+    def __init__(self, **kwargs: object) -> None:
+        del kwargs
+
+    def start(self) -> None:
+        raise RuntimeError("private reader start failure")
+
+    def is_alive(self) -> bool:
+        return False
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+
+def test_git_collector_cleans_up_when_reader_start_fails(tmp_path: Path) -> None:
+    """Catches a thread-start failure that bypasses cleanup after a Git process is created."""
+    process = _CloseContentionProcess()
+    with patch("repoproof.collectors.git.subprocess.Popen", return_value=process):
+        with patch("repoproof.collectors.git.threading.Thread", _StartFailureReader):
+            evidence = GitCollector().collect(
+                AuditContext(tmp_path, True), load_profile("ai4se-b")
+            )[0]
+
+    assert evidence.state is EvidenceState.UNAVAILABLE
+    assert evidence.facts == {"reason": "git_unavailable_or_not_repository"}
+    assert "private reader start failure" not in repr(evidence)
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert all(0.0 <= timeout <= 1.0 for timeout in process.wait_timeouts)
