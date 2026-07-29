@@ -1,9 +1,10 @@
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import IO, Protocol
 
 from repoproof.collectors.base import AuditContext, collector_provenance
 from repoproof.domain import Evidence, EvidenceState
@@ -11,13 +12,60 @@ from repoproof.profile.models import Profile
 
 MAX_GIT_OUTPUT_BYTES = 1024 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
+_CLEANUP_TIMEOUT_SECONDS = 0.1
 
 
-def _read_bounded_output(stream: BinaryIO, maximum: int, output: bytearray) -> None:
-    while chunk := stream.read(_READ_CHUNK_BYTES):
-        remaining = maximum - len(output)
-        if remaining > 0:
-            output.extend(chunk[:remaining])
+def _read_bounded_output(
+    stream: IO[bytes], maximum: int, output: bytearray, read_failed: list[bool]
+) -> None:
+    try:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            remaining = maximum - len(output)
+            if remaining > 0:
+                output.extend(chunk[:remaining])
+    except Exception:
+        read_failed[0] = True
+
+
+def _remaining_seconds(deadline: float) -> float:
+    return max(deadline - time.monotonic(), 0.0)
+
+
+def _ignore_cleanup_failure(operation: Callable[[], object]) -> None:
+    try:
+        operation()
+    except Exception:
+        return
+
+
+def _bounded_wait(process: subprocess.Popen[bytes], deadline: float) -> None:
+    try:
+        process.wait(timeout=_remaining_seconds(deadline))
+    except Exception:
+        return
+
+
+def _bounded_join(reader: threading.Thread, deadline: float) -> None:
+    try:
+        reader.join(timeout=_remaining_seconds(deadline))
+    except Exception:
+        return
+
+
+def _cleanup_process(
+    process: subprocess.Popen[bytes], stream: IO[bytes] | None, reader: threading.Thread | None
+) -> None:
+    deadline = time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
+    if stream is not None:
+        _ignore_cleanup_failure(stream.close)
+    if process.returncode is None:
+        _ignore_cleanup_failure(process.terminate)
+        _bounded_wait(process, deadline)
+    if process.returncode is None:
+        _ignore_cleanup_failure(process.kill)
+        _bounded_wait(process, deadline)
+    if reader is not None:
+        _bounded_join(reader, deadline)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,14 +84,15 @@ class GitRunner:
             stderr=subprocess.DEVNULL,
             shell=False,
         )
-        if process.stdout is None:
-            process.kill()
-            process.wait()
+        stream = process.stdout
+        if stream is None:
+            _cleanup_process(process, None, None)
             raise RuntimeError("git command unavailable")
         output = bytearray()
+        read_failed = [False]
         reader = threading.Thread(
             target=_read_bounded_output,
-            args=(process.stdout, max_output, output),
+            args=(stream, max_output, output, read_failed),
             daemon=True,
         )
         reader.start()
@@ -52,14 +101,12 @@ class GitRunner:
             reader.join(timeout=max(deadline - time.monotonic(), 0.0))
             if reader.is_alive():
                 raise subprocess.TimeoutExpired([self.executable, *args], timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            reader.join()
-            raise
-        if process.returncode != 0:
-            raise RuntimeError("git command unavailable")
-        return bytes(output).decode("utf-8", errors="replace").strip()
+            if read_failed[0] or process.returncode != 0:
+                raise RuntimeError("git command unavailable")
+            return bytes(output).decode("utf-8", errors="replace").strip()
+        finally:
+            if process.returncode is None or reader.is_alive():
+                _cleanup_process(process, stream, reader)
 
 
 class _GitCommandRunner(Protocol):
