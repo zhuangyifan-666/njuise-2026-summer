@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
+
 from repoproof.domain import Finding, FindingStatus, Location, Severity
 from repoproof.profile.models import Profile
 from repoproof.reporting.console import render_console
@@ -23,8 +25,8 @@ class _PayloadBodyParser(HTMLParser):
             self.payload = dict(attrs).get("data-report")
 
 
-def _report():
-    profile = Profile.model_validate(
+def _profile() -> Profile:
+    return Profile.model_validate(
         {
             "schema": 1,
             "name": "test-policy",
@@ -41,8 +43,11 @@ def _report():
             ],
         }
     )
+
+
+def _report():
     return build_report(
-        profile,
+        _profile(),
         Path("demo-repository"),
         (
             Finding(
@@ -320,3 +325,55 @@ def test_private_key_blocks_and_hidden_secret_segments_do_not_reach_any_renderer
     assert all(segment not in repr(report) for segment in secret_segments)
     assert report.profile_name == "private-project"
     assert "<redacted:private-key:" in report.findings[0].message
+
+
+@pytest.mark.parametrize("start", (999, 1000, 1001), ids=("before", "at", "after"))
+@pytest.mark.parametrize(
+    ("credential", "secret"),
+    (
+        ("ghp_GithubBoundaryCanary0123456789ABCD", "GithubBoundaryCanary0123456789ABCD"),
+        (
+            "github_pat_GithubBoundaryCanary0123456789ABCD",
+            "GithubBoundaryCanary0123456789ABCD",
+        ),
+        ("api_key = 'ApiKeyBoundaryCanary0123456789ABCD", "ApiKeyBoundaryCanary0123456789ABCD"),
+        ("token:TokenBoundaryCanary0123456789ABCD", "TokenBoundaryCanary0123456789ABCD"),
+        ("password = PasswordBoundaryCanary0123456789ABCD", "PasswordBoundaryCanary0123456789ABCD"),
+        ("secret=SecretBoundaryCanary0123456789ABCD", "SecretBoundaryCanary0123456789ABCD"),
+    ),
+    ids=("ghp", "github-pat", "api-key", "token", "password", "secret"),
+)
+def test_credentials_across_report_cutoff_leave_no_raw_fragment_in_any_surface(
+    start: int, credential: str, secret: str
+) -> None:
+    filler = "~" * start
+    report = build_report(
+        _profile(),
+        Path("demo-repository"),
+        (
+            Finding(
+                "docs.present",
+                FindingStatus.FAIL,
+                Severity.ERROR,
+                f"{filler}{credential}:tail",
+                (),
+                (),
+                "add README",
+            ),
+        ),
+        (),
+        {},
+        datetime(2026, 7, 29, tzinfo=UTC),
+    )
+    raw_prefix = credential[: max(0, 1000 - start)]
+    surfaces = (
+        repr(report),
+        repr(report_to_dict(report)),
+        render_console(report, color=False, verbose=True),
+        render_json(report),
+        render_html(report),
+    )
+
+    assert raw_prefix == "" or all(f"{filler}{raw_prefix}" not in item for item in surfaces)
+    assert all(secret[:20] not in item and secret[-20:] not in item for item in surfaces)
+    assert all(credential not in item for item in surfaces)

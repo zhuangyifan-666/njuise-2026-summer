@@ -15,6 +15,27 @@ from repoproof.profile.loader import profile_hash
 from repoproof.profile.models import Profile
 
 _MAX_TEXT_LENGTH = 1_000
+_MAX_CREDENTIAL_VALUE_LENGTH = 255
+_MAX_ASSIGNMENT_PADDING = 32
+_MAX_ASSIGNMENT_PATTERN_LENGTH = (
+    len("password")
+    + _MAX_ASSIGNMENT_PADDING
+    + 1
+    + _MAX_ASSIGNMENT_PADDING
+    + 1
+    + _MAX_CREDENTIAL_VALUE_LENGTH
+)
+_MAX_TOKEN_PATTERN_LENGTH = len("github_pat_") + _MAX_CREDENTIAL_VALUE_LENGTH
+_MAX_PEM_BEGIN_LENGTH = len("-----BEGIN OPENSSH PRIVATE KEY-----")
+_SECRET_LOOKAHEAD = (
+    max(
+        _MAX_ASSIGNMENT_PATTERN_LENGTH,
+        _MAX_TOKEN_PATTERN_LENGTH,
+        _MAX_PEM_BEGIN_LENGTH,
+    )
+    + 1
+)
+_MAX_SANITIZER_SCAN_LENGTH = _MAX_TEXT_LENGTH + _SECRET_LOOKAHEAD
 _STATUS_ORDER = {
     FindingStatus.FAIL: 0,
     FindingStatus.WARN: 1,
@@ -34,13 +55,19 @@ _PEM_BEGIN = re.compile(
     re.IGNORECASE,
 )
 _ASSIGNMENT_SECRET = re.compile(
-    r"\b(?P<label>api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?"
-    r"(?P<secret>[A-Za-z0-9_+/=-]{20,255})",
+    rf"\b(?:api[_-]?key|token|password|secret)"
+    rf"[ \t]{{0,{_MAX_ASSIGNMENT_PADDING}}}[:=]"
+    rf"[ \t]{{0,{_MAX_ASSIGNMENT_PADDING}}}['\"]?"
+    rf"(?P<secret>[A-Za-z0-9_+/=-]{{20,{_MAX_CREDENTIAL_VALUE_LENGTH}}})"
+    r"(?![A-Za-z0-9_+/=-])",
     re.IGNORECASE,
 )
 _TOKEN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-    r"sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16})(?![A-Za-z0-9_])"
+    rf"(?<![A-Za-z0-9_])(?:"
+    rf"gh[pousr]_[A-Za-z0-9]{{20,{_MAX_CREDENTIAL_VALUE_LENGTH}}}|"
+    rf"github_pat_[A-Za-z0-9_]{{20,{_MAX_CREDENTIAL_VALUE_LENGTH}}}|"
+    rf"sk-[A-Za-z0-9]{{16,{_MAX_CREDENTIAL_VALUE_LENGTH}}}|"
+    r"AKIA[0-9A-Z]{16})(?![A-Za-z0-9_])"
 )
 _HIGH_ENTROPY = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9_])")
 _SENSITIVE_SECRET_FILENAMES = frozenset({"id_rsa", "id_ed25519", ".env", "credentials.json"})
@@ -97,7 +124,7 @@ def _redact_private_key_blocks(value: str) -> str:
 def _redact_secrets(value: str) -> str:
     value = _redact_private_key_blocks(value)
     value = _ASSIGNMENT_SECRET.sub(
-        lambda match: f"{match.group('label')}={_redaction('credential', match.group('secret'))}",
+        lambda match: _redaction("credential", match.group("secret")),
         value,
     )
     value = _TOKEN.sub(lambda match: _redaction("token", match.group(0)), value)
@@ -107,14 +134,20 @@ def _redact_secrets(value: str) -> str:
 def sanitize_text(value: object) -> str:
     """Return deterministic bounded text that contains no raw recognized secret or control code."""
     try:
-        text = value if isinstance(value, str) else str(value)
-        text = _normalize_controls(text)
-        truncated = len(text) > _MAX_TEXT_LENGTH
-        bounded = text[:_MAX_TEXT_LENGTH]
-        text = _redact_secrets(bounded)
+        raw = value if isinstance(value, str) else str(value)
+        scan_was_bounded = len(raw) > _MAX_SANITIZER_SCAN_LENGTH
+        text = _normalize_controls(raw[:_MAX_SANITIZER_SCAN_LENGTH])
+        redacted = _redact_secrets(text)
+        sanitized_was_truncated = (
+            len(text) > _MAX_TEXT_LENGTH or len(redacted) > _MAX_TEXT_LENGTH
+        )
+        truncated = scan_was_bounded or sanitized_was_truncated
         if truncated:
-            return f"{text}<truncated:{_fingerprint(bounded)}>"
-        return text
+            return (
+                f"{redacted[:_MAX_TEXT_LENGTH]}<truncated:"
+                f"{_fingerprint(text[:_MAX_TEXT_LENGTH])}>"
+            )
+        return redacted
     except BaseException:
         return "<unavailable>"
 
