@@ -60,3 +60,66 @@ boundary, a hostile concurrent filesystem can still race a check between the
 final safety check and `open` on platforms without a no-follow open primitive;
 the implementation rechecks immediately before opening and never intentionally
 follows a discovered link or reparse point.
+
+## Formal review round 1/5
+
+### Remediated findings
+
+- **C1 / I4:** allowlist file I/O, UTF-8 decoding, YAML scanning/composition/
+  parsing, structural validation, and Pydantic validation are contained in a
+  raw-bearing helper. The helper catches parser/resource failures and returns a
+  status/model only after clearing raw references. It uses a verified regular
+  handle, an actual-read 1 MiB cap, descriptor revalidation, alias, depth,
+  node, and container-size limits. Public failures are raised by a non-raw
+  wrapper without cause/context.
+- **C2:** raw secret scanning is now a status-returning helper. It catches
+  timeout, reader, and classifier failures while raw fragments/windows/tails
+  exist, clears them, and lets the outer non-raw collector produce a sanitized
+  `RuntimeFailure`.
+- **I3:** added handle-based regular-file opening. POSIX uses component-wise
+  `openat` with `O_NOFOLLOW`; Windows uses `CreateFileW` with final reparse-point
+  opening, opened-handle final-path containment, and fail-closed reparse/type
+  checks before content reads. A final-link regression verifies no handle is
+  returned for an external link.
+- **I5 / I7:** scanner size limits are checked from the opened descriptor and
+  revalidated after streaming. The initial binary probe is the first classified
+  chunk; it is not seeked/reread, and actual read bytes never exceed the budget.
+- **I6:** chunk processing defers unstable suffix matches in a bounded overlap
+  and classifies final physical-line/EOF fragments once. Maximum token and
+  split private-key/assignment regressions prevent truncation or duplicates.
+- **I8:** high-entropy classification carries the exact threshold-triggered rule
+  IDs; `allowlisted_for` can credit only those IDs, in canonical order.
+
+### Review TDD evidence
+
+- RED: four initial focused regressions failed against the prior implementation:
+  allowlist raw values remained in traceback frames (including deep nesting), a
+  classifier exception escaped directly, and stale inventory metadata reported
+  an oversized opened file.
+- GREEN: after the helper/handle changes,
+  `python -m pytest tests/unit/test_security.py tests/unit/test_allowlist.py
+  tests/unit/collectors/test_secrets.py
+  tests/integration/collectors/test_secret_non_disclosure.py
+  tests/integration/collectors/test_files.py -q` reported `33 passed, 5 skipped`.
+  The added split private-key/assignment boundary test then reported `1 passed`.
+- Final fresh verification is recorded below after the complete command set.
+
+### Formal review final verification
+
+- `python -m pytest tests/unit/test_security.py tests/unit/test_allowlist.py
+  tests/unit/collectors/test_secrets.py
+  tests/integration/collectors/test_secret_non_disclosure.py
+  tests/integration/collectors/test_files.py -q` — `34 passed, 5 skipped`.
+- `python -m ruff check src tests` — clean.
+- `python -m mypy src` — `Success: no issues found in 19 source files`.
+- `python -m pytest -q` — `89 passed, 5 skipped`.
+- `git diff --check` — clean (only expected Git CRLF conversion notices).
+
+### Review concerns
+
+The two explicitly deferred Minor report/history findings were not changed in
+this round. Windows path handling is covered by `CreateFileW` final-component
+reparse opening and final-handle containment; if those handle queries fail the
+operation fails closed before bytes are read. Parent-component changes are
+preflight-reparse-checked and final-handle-contained; no content is read from a
+replaced target before that containment validation.

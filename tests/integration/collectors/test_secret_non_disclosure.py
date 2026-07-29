@@ -1,14 +1,19 @@
 import hashlib
+import io
+import traceback
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from repoproof.collectors.base import AuditContext
 from repoproof.collectors.files import RepositoryFile
-from repoproof.collectors.secrets import SecretCollector
+from repoproof.collectors.secrets import _READ_CHUNK_BYTES, SecretCollector
 from repoproof.errors import RuntimeFailure
 from repoproof.profile.loader import load_profile
+from repoproof.profile.models import Profile
+from repoproof.security import SafeRegularFile
 
 CANARY = "ghp_" + "0123456789abcdefghijklmnopqrstuvwxyz"
 
@@ -17,6 +22,23 @@ def _collect(root: Path, **context_values: object):
     return SecretCollector().collect(
         AuditContext(root, offline=True, **context_values), load_profile("ai4se-b")
     )[0]
+
+
+def _traceback_contains(exception: BaseException, marker: str) -> bool:
+    trace = exception.__traceback__
+    while trace is not None:
+        filename = trace.tb_frame.f_code.co_filename.replace("\\", "/")
+        if "/src/repoproof/" in filename and any(
+            marker in repr(value) for value in trace.tb_frame.f_locals.values()
+        ):
+            return True
+        trace = trace.tb_next
+    detailed = traceback.TracebackException.from_exception(exception, capture_locals=True)
+    return any(
+        "/src/repoproof/" in frame.filename.replace("\\", "/")
+        and marker in repr(frame.locals)
+        for frame in detailed.stack
+    )
 
 
 def test_token_match_contains_only_safe_metadata(tmp_path: Path) -> None:
@@ -128,3 +150,179 @@ def test_expired_context_stops_before_opening_candidate(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeFailure, match="timed out"):
         _collect(tmp_path, timeout_seconds=0.0)
+
+
+def test_classifier_failure_traceback_never_retains_candidate_text(tmp_path: Path) -> None:
+    """Catches raw candidate/window locals escaping through classifier failures."""
+    marker = "scanner-traceback-canary"
+    (tmp_path / "config.txt").write_text(f"token = '{CANARY}'\n{marker}\n", encoding="utf-8")
+
+    with patch.object(SecretCollector, "_classify", side_effect=RuntimeError(marker)):
+        with pytest.raises(RuntimeFailure) as error:
+            _collect(tmp_path)
+
+    assert not _traceback_contains(error.value, marker)
+
+
+def test_read_failure_traceback_never_retains_candidate_text(tmp_path: Path) -> None:
+    """Catches a raw reader failure that escapes from the raw-processing helper."""
+    marker = "read-traceback-canary"
+    target = tmp_path / "config.txt"
+    target.write_text("placeholder", encoding="utf-8")
+
+    class BrokenStream(io.BytesIO):
+        def read(self, size: int = -1) -> bytes:
+            raise OSError(marker)
+
+    opened = SafeRegularFile(BrokenStream(), 0)
+    with patch("repoproof.collectors.secrets.open_regular_file", return_value=opened):
+        with pytest.raises(RuntimeFailure) as error:
+            _collect(tmp_path)
+
+    assert not _traceback_contains(error.value, marker)
+
+
+def test_timeout_traceback_never_retains_candidate_text(tmp_path: Path) -> None:
+    """Catches timeout propagation from a frame that has already read raw content."""
+    marker = "timeout-traceback-canary"
+    (tmp_path / "config.txt").write_text(CANARY + marker, encoding="utf-8")
+
+    with patch(
+        "repoproof.collectors.secrets._raise_if_timed_out",
+        side_effect=[None, None, RuntimeFailure(marker, "test-only")],
+    ):
+        with pytest.raises(RuntimeFailure) as error:
+            _collect(tmp_path)
+
+    assert not _traceback_contains(error.value, marker)
+
+
+def test_stale_inventory_with_complete_token_and_trailing_growth_is_discarded(
+    tmp_path: Path,
+) -> None:
+    """Catches descriptor-size checks that trust stale inventory over opened content."""
+    target = tmp_path / "config.txt"
+    target.write_text(CANARY + "\n" + ("x" * 40), encoding="utf-8")
+    stale_entry = RepositoryFile("config.txt", target, len(CANARY))
+
+    with patch("repoproof.collectors.secrets.repository_files", return_value=(stale_entry,)):
+        evidence = _collect(tmp_path, max_read_bytes=len(CANARY))
+
+    assert evidence.facts["matches"] == ()
+
+
+def test_max_length_token_split_across_read_boundary_has_one_fingerprint(tmp_path: Path) -> None:
+    """Catches chunk-boundary scanners that drop or duplicate a maximum-length token."""
+    token = b"ghp_" + (b"a" * 255)
+    target = tmp_path / "config.txt"
+    target.write_bytes((b"x" * (_READ_CHUNK_BYTES - 2)) + b" " + token + b"\n")
+
+    evidence = _collect(tmp_path)
+    token_matches = [item for item in evidence.facts["matches"] if item["category"] == "token"]
+
+    assert [item["fingerprint"] for item in token_matches] == [
+        hashlib.sha256(token).hexdigest()[:8]
+    ]
+
+
+def test_private_key_and_assignment_split_across_boundaries_are_not_truncated(
+    tmp_path: Path,
+) -> None:
+    """Catches boundary handling that loses private-key or assignment suffixes."""
+    assignment = b"password=" + (b"A1b2C3d4E5f6G7h8I9j0" * 2)
+    payload = (
+        (b"x" * (_READ_CHUNK_BYTES - 10))
+        + b"-----BEGIN RSA PRIVATE KEY-----\n"
+        + (b"y" * (_READ_CHUNK_BYTES - 5))
+        + assignment
+        + b"\n"
+    )
+    (tmp_path / "config.txt").write_bytes(payload)
+
+    evidence = _collect(tmp_path)
+
+    assert {item["category"] for item in evidence.facts["matches"]} == {
+        "private_key",
+        "high_entropy",
+    }
+
+
+def test_read_budget_uses_probe_bytes_without_a_second_read(tmp_path: Path) -> None:
+    """Catches a binary probe that rereads content or exceeds the real byte budget."""
+    class CountingStream(io.BytesIO):
+        def __init__(self, payload: bytes) -> None:
+            super().__init__(payload)
+            self.read_bytes = 0
+
+        def read(self, size: int = -1) -> bytes:
+            result = super().read(size)
+            self.read_bytes += len(result)
+            return result
+
+        def fileno(self) -> int:
+            return 17
+
+    target = tmp_path / "config.txt"
+    target.write_text("placeholder", encoding="utf-8")
+    payload = CANARY.encode()
+    stream = CountingStream(payload)
+    opened = SafeRegularFile(stream, len(payload))
+
+    with (
+        patch("repoproof.collectors.secrets.open_regular_file", return_value=opened),
+        patch(
+            "repoproof.collectors.secrets.os.fstat",
+            return_value=SimpleNamespace(st_size=len(payload)),
+        ),
+    ):
+        evidence = _collect(tmp_path, max_read_bytes=len(payload))
+
+    assert stream.read_bytes <= len(payload)
+    assert [item["category"] for item in evidence.facts["matches"]] == ["token"]
+
+
+def test_high_entropy_allowlist_uses_only_rules_whose_threshold_triggered(tmp_path: Path) -> None:
+    """Catches allowlist metadata that credits a stricter non-triggered entropy rule."""
+    value = "abcdefghijklmnopqrstuvwx0123456789ABCDEFGH"
+    target = tmp_path / "config.txt"
+    target.write_text(f"password={value}\n", encoding="utf-8")
+    fingerprint = hashlib.sha256(value.encode()).hexdigest()[:8]
+    (tmp_path / ".repoproofallowlist.yml").write_text(
+        "schema: 1\nentries:\n"
+        "  - rule_id: security.low\n"
+        "    path: config.txt\n"
+        f"    fingerprint: {fingerprint}\n"
+        "  - rule_id: security.high\n"
+        "    path: config.txt\n"
+        f"    fingerprint: {fingerprint}\n",
+        encoding="utf-8",
+    )
+    profile = Profile.model_validate(
+        {
+            "schema": 1,
+            "name": "entropy-policy",
+            "description": "entropy test",
+            "rules": [
+                {
+                    "id": "security.low",
+                    "type": "secret_scan",
+                    "severity": "error",
+                    "params": {"categories": ["high_entropy"], "entropy_threshold": 3.0},
+                    "remediation": "remove it",
+                },
+                {
+                    "id": "security.high",
+                    "type": "secret_scan",
+                    "severity": "error",
+                    "params": {"categories": ["high_entropy"], "entropy_threshold": 8.0},
+                    "remediation": "remove it",
+                },
+            ],
+        }
+    )
+
+    evidence = SecretCollector().collect(AuditContext(tmp_path, offline=True), profile)[0]
+    match = evidence.facts["matches"][0]
+
+    assert match["category"] == "high_entropy"
+    assert match["allowlisted_for"] == ("security.low",)
