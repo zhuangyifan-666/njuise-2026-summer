@@ -74,3 +74,52 @@
 - **额外工具**：为核对 Codex 插件机制，注册 OpenAI 官方文档 MCP；使用命令级临时覆盖绕过当前 CLI 对全局 `service_tier = "priority"` 的兼容问题，未修改用户全局模型配置。
 - **偏离说明**：由于 Codex CLI 的非交互接口只能注册 marketplace，无法执行 UI 中的插件安装动作，本次使用同一官方仓库、同一固定版本的完整技能集安装作为兼容方案。后续所有必需 Superpowers 技能将逐项触发并记录。
 - **教训**：必须区分“注册 marketplace”“插件 UI 安装”和“技能实际可发现”三个状态，不能仅看到源码缓存就声称安装成功。
+
+### 16:55–17:00 · P1 · Superpowers brainstorming：定位收敛
+
+- **触发技能**：`using-superpowers`、`brainstorming`。
+- **关键问题**：项目应做通用审计、AI4SE 专用检查，还是安全扫描？
+- **采用方案**：通用声明式策略引擎，并内置 AI4SE B 类作业 profile。
+- **推翻方案**：
+  - 放弃硬编码课程检查清单，因为复用性与工程深度不足。
+  - 放弃安全扫描器主线，因为会偏离交付证据治理并扩大误报治理范围。
+- **当前边界**：离线优先、默认只读、无自主 Agent、无 LLM 依赖、CLI + GitHub Release。
+- **详细证据**：见 `SPEC_PROCESS.md` 的“迭代 1”。
+- **门禁**：设计尚未得到学生批准，不得生成实现或调用实现技能。
+
+### P1 · 设计签字 1：产品边界
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：本地只读审计；检查文档、CI、Git 过程、分发与疑似凭据；输出终端/JSON/HTML 报告与稳定退出码；不自动修复、不上传源码、不依赖 LLM、首版不开发 WebUI。
+- **影响**：允许继续呈现架构设计，但在全部设计批准前仍不得实现。
+
+### P1 · 设计签字 2：架构与模块
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：CLI、Profile、Collectors、Rule Engine、Reporters、Credential Store / GitHub Gateway 的分层架构，以及 Profile、Rule、Evidence、Finding、AuditReport 核心实体。
+- **影响**：模块可独立测试；继续细化规则语义、错误与安全设计。
+
+### P1 · 设计签字 3：规则、错误与安全
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：六类首版规则、四种结果状态、四档稳定退出码、路径围栏、扫描资源上限、Secret 脱敏、系统钥匙串和受限 GitHub HTTPS 访问。
+- **影响**：安全机制和错误语义已具备可测试的客观边界；继续确认技术栈、测试与分发。
+
+### P1 · 设计签字 4 与规约落盘
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：Python 技术栈、分层测试、性能目标、GitHub/GitLab CI 和 Windows x64 GitHub Release。
+- **产物**：`SPEC.md`、`docs/superpowers/specs/2026-07-29-repoproof-design.md`。
+- **人工干预**：四节设计均由学生逐节批准；文档细化由 Codex 完成。
+- **门禁**：对书面 SPEC 完成自审并由学生最终审阅后，才允许进入 `writing-plans`。
+
+### P1 · 规约自审
+
+- **触发技能**：`brainstorming` 的 Spec Self-Review。
+- **检查**：占位符、内部一致性、范围、歧义、whitespace。
+- **修正**：
+  - 明确本地 merge / 远程 PR Evidence 与 `git_history` 的关系。
+  - 明确本地 Release workflow / 远程 Release Evidence 与 `distribution_ready` 的关系。
+  - 将 `SPEC_PROCESS.md` 的历史“前置准备”状态更新为已完成设计、等待书面审阅。
+- **证据**：8 个唯一用户故事；20 个唯一验收标准；占位符扫描为 0；`git diff --check` 无错误。
+- **门禁**：学生尚需审阅已落盘的书面 `SPEC.md`。
