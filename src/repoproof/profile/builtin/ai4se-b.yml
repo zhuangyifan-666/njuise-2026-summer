@@ -1,0 +1,84 @@
+schema: 1
+name: ai4se-b
+description: AI4SE B project release-readiness checks
+manual_checks:
+  - Review REFLECTION.md for concrete lessons and limitations.
+  - Review whether module responsibilities are clear and cohesive.
+  - Review whether Git history supports the claimed TDD and review process.
+rules:
+  - id: docs.required
+    type: path_exists
+    severity: error
+    params:
+      paths: [SPEC.md, PLAN.md, SPEC_PROCESS.md, README.md, AGENT_LOG.md, REFLECTION.md, .gitlab-ci.yml]
+      min_matches: 7
+    remediation: Add every required course document and GitLab CI file.
+  - id: readme.sections
+    type: markdown_sections
+    severity: error
+    params:
+      path: README.md
+      headings: [项目简介, 安装, 运行, 测试, 分发, 目录结构, 安全边界, 已知限制]
+      aliases:
+        项目简介: [Overview]
+        安装: [Installation]
+        运行: [Usage]
+        测试: [Testing]
+        分发: [Distribution]
+        目录结构: [Project Structure]
+        安全边界: [Security Boundary]
+        已知限制: [Known Limitations]
+    remediation: Add the required README sections.
+  - id: plan.commit-evidence
+    type: markdown_sections
+    severity: warning
+    params:
+      path: PLAN.md
+      completed_items_require_commit: true
+    remediation: Add a 7-40 character Git commit hash to every completed PLAN checklist item.
+  - id: ci.gitlab-unit-test
+    type: ci_job_exists
+    severity: error
+    params: {ci: gitlab, path: .gitlab-ci.yml, job: unit-test}
+    remediation: Add a top-level unit-test job to .gitlab-ci.yml.
+  - id: ci.github
+    type: path_exists
+    severity: warning
+    params: {paths: [.github/workflows/*.yml, .github/workflows/*.yaml], min_matches: 1}
+    remediation: Add a GitHub Actions test workflow.
+  - id: test.entry
+    type: path_exists
+    severity: error
+    params: {paths: [Makefile, pyproject.toml, package.json, Cargo.toml], min_matches: 1}
+    remediation: Add a one-command test entry point.
+  - id: git.minimum-history
+    type: git_history
+    severity: error
+    params: {min_commits: 5}
+    remediation: Preserve at least five focused commits.
+  - id: git.process-evidence
+    type: git_history
+    severity: warning
+    params:
+      min_commits: 1
+      require_non_default_branch: true
+      accept_local_merge: true
+      accept_remote_pr: true
+    remediation: Preserve a non-default branch plus local merge or remote pull request evidence.
+  - id: distribution.windows-release
+    type: distribution_ready
+    severity: error
+    params:
+      allowed: [python]
+      required_paths: [pyproject.toml, repoproof.spec]
+      require_release_workflow: true
+      accept_published_release: true
+    remediation: Add packaging configuration and a Release workflow or published Release.
+  - id: security.secrets
+    type: secret_scan
+    severity: error
+    params:
+      categories: [token, private_key, high_entropy, sensitive_file]
+      entropy_threshold: 4.0
+      exclude_paths: [.git/**, .venv/**, dist/**, build/**]
+    remediation: Revoke and remove the suspected secret, then use a safe credential store.

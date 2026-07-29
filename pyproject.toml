@@ -36,6 +36,9 @@ repoproof = "repoproof.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/repoproof"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/repoproof/profile/builtin/ai4se-b.yml" = "repoproof/profile/builtin/ai4se-b.yml"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
