@@ -163,3 +163,10 @@ RepoProof 是一个发布前仓库审计与证据报告 CLI。目标用户是需
 - 结构检查：Task 1–15 各出现一次，240 个 Markdown fence 配对。
 - 完整性检查：禁止的未来工作/含糊占位语言为 0，跨 Task 锁定接口均存在，`git diff --check` 无错误。
 - 下一门禁：学生选择 Subagent-Driven 或 Inline Execution 后，才进入实现。
+
+### 执行方式与测试准则裁决
+
+- 学生选择 Subagent-Driven Development。
+- 执行前扫描发现 Task 13/14/15 的源码文本断言与 `writing-good-tests` 的行为测试准则冲突。
+- 学生批准按推荐方案修订：CI 使用解析后的配置结构与真实构建/冒烟验证，课程文档使用 RepoProof 自审结果验证，版本使用安装后元数据与 CLI 输出验证。
+- 隔离实现分支：`agent/implementation-repoproof`。

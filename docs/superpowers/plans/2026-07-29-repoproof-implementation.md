@@ -3417,21 +3417,37 @@ ROOT = Path(__file__).parents[2]
 def test_gitlab_has_exact_unit_test_job() -> None:
     config = yaml.safe_load((ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8"))
     assert "unit-test" in config
-    assert "python -m pytest" in config["unit-test"]["script"]
+    assert config["unit-test"]["script"] == [
+        'python -m pip install -e ".[dev]"',
+        "python -m pytest",
+    ]
 
-def test_ci_matrix_covers_python_312_and_313() -> None:
-    text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert '"3.12"' in text
-    assert '"3.13"' in text
-    assert "python -m ruff check" in text
-    assert "python -m mypy" in text
+def load_workflow(name: str) -> dict[str, object]:
+    return yaml.load(
+        (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
 
-def test_release_is_tag_only_and_builds_on_windows() -> None:
-    text = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert "tags: [\"v*\"]" in text
-    assert "runs-on: windows-latest" in text
-    assert "repoproof version" in text
-    assert "examples/compliant-repo" in text
+def test_ci_workflow_has_required_executable_structure() -> None:
+    config = load_workflow("ci.yml")
+    verify = config["jobs"]["verify"]
+    assert verify["strategy"]["matrix"]["python-version"] == ["3.12", "3.13"]
+    commands = [step["run"] for step in verify["steps"] if "run" in step]
+    assert commands == [
+        'python -m pip install -e ".[dev]"',
+        "python -m ruff check src tests",
+        "python -m mypy src",
+        "python -m pytest",
+    ]
+
+def test_release_workflow_is_tag_only_and_smoke_tests_windows_artifact() -> None:
+    config = load_workflow("release.yml")
+    assert config["on"]["push"]["tags"] == ["v*"]
+    build = config["jobs"]["build"]
+    assert build["runs-on"] == "windows-latest"
+    script = next(step["run"] for step in build["steps"] if "Move-Item" in step.get("run", ""))
+    assert '& "dist/$name" version' in script
+    assert '& "dist/$name" audit examples/compliant-repo --offline --format json' in script
 ```
 
 - [ ] **Step 2: Run static delivery tests and verify RED**
@@ -3601,27 +3617,25 @@ git commit -m "ci: verify package and publish Windows releases"
 
 ```python
 # tests/unit/test_course_documents.py
+import json
 from pathlib import Path
-import re
+from typer.testing import CliRunner
+from repoproof.cli import app
 
 ROOT = Path(__file__).parents[2]
-README_HEADINGS = ("项目简介", "安装", "运行", "测试", "分发", "目录结构", "安全边界", "已知限制")
 
-def test_required_course_documents_exist() -> None:
-    for name in ("SPEC.md", "PLAN.md", "SPEC_PROCESS.md", "README.md",
-                 "AGENT_LOG.md", "REFLECTION.md", ".gitlab-ci.yml"):
-        assert (ROOT / name).is_file(), name
-
-def test_readme_has_every_required_heading() -> None:
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    for heading in README_HEADINGS:
-        assert re.search(rf"(?m)^##+\s+{re.escape(heading)}\s*$", text), heading
-
-def test_completed_plan_rows_have_commit_hashes() -> None:
-    text = (ROOT / "PLAN.md").read_text(encoding="utf-8")
-    completed = [line for line in text.splitlines() if "| completed |" in line]
-    assert completed
-    assert all(re.search(r"`[0-9a-f]{7,40}`", line) for line in completed)
+def test_course_documents_pass_the_bundled_profile() -> None:
+    result = CliRunner().invoke(app, [
+        "audit", str(ROOT), "--profile", "ai4se-b", "--offline",
+        "--format", "json", "--no-color",
+    ])
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    by_rule = {finding["rule_id"]: finding["status"] for finding in payload["findings"]}
+    assert by_rule["docs.required"] == "PASS"
+    assert by_rule["readme.sections"] == "PASS"
+    assert by_rule["plan.commit-evidence"] == "PASS"
+    assert by_rule["ci.gitlab-unit-test"] == "PASS"
 ```
 
 - [ ] **Step 2: Run documentation tests and verify RED**
@@ -3762,16 +3776,19 @@ git commit -m "docs: complete RepoProof delivery evidence"
 - [ ] **Step 1: Set version 1.0.0 and write a failing version-consistency test**
 
 ```python
-# append to tests/unit/test_delivery_config.py
-import tomllib
-from repoproof import __version__
+# tests/unit/test_delivery_config.py (release behavior addition)
+from importlib.metadata import version as installed_version
+from typer.testing import CliRunner
+from repoproof.cli import app
 
-def test_package_and_project_versions_match() -> None:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == project["project"]["version"] == "1.0.0"
+def test_installed_cli_reports_release_version() -> None:
+    result = CliRunner().invoke(app, ["version"], color=False)
+    assert result.exit_code == 0
+    assert installed_version("repoproof") == "1.0.0"
+    assert result.stdout == "repoproof 1.0.0\n"
 ```
 
-Run: `python -m pytest tests/unit/test_delivery_config.py::test_package_and_project_versions_match -q`
+Run: `python -m pytest tests/unit/test_delivery_config.py::test_installed_cli_reports_release_version -q`
 
 Expected: FAIL because both current versions are `0.1.0`.
 
@@ -3785,7 +3802,9 @@ __version__ = "1.0.0"
 
 Set `project.version = "1.0.0"` in `pyproject.toml`.
 
-Run: `python -m pytest tests/unit/test_delivery_config.py::test_package_and_project_versions_match -q`
+Run: `python -m pip install -e .`
+
+Run: `python -m pytest tests/unit/test_delivery_config.py::test_installed_cli_reports_release_version -q`
 
 Expected: PASS.
 

@@ -149,3 +149,12 @@
 - **机械证据**：Task 1–15 各一次；AC-01–20 全覆盖；240 个 fence 配对；禁止未来工作语言 0；`git diff --check` 无错误。
 - **人工干预**：本阶段无需新增人工输入。
 - **下一门禁**：提交计划后由学生选择执行方式。
+
+### P1 · Subagent-Driven 执行启动
+
+- **学生选择**：Subagent-Driven Development。
+- **隔离工作树**：`.worktrees/repoproof-implementation`，分支 `agent/implementation-repoproof`。
+- **技能**：`using-git-worktrees`、`subagent-driven-development`、`test-driven-development`。
+- **基线**：Task 1 前尚无 `pyproject.toml` 或测试套件；环境未安装 pytest；`git diff --check` 通过。
+- **执行前冲突**：Task 13/14/15 原计划包含源码文本断言，与行为测试准则冲突。
+- **人工裁决**：学生批准改用解析后的 CI 结构与真实构建、RepoProof 自审结果、安装后 CLI/元数据验证。
