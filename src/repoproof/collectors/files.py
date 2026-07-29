@@ -1,6 +1,7 @@
 import os
 import stat
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pathspec
@@ -11,6 +12,15 @@ from repoproof.errors import RuntimeFailure
 from repoproof.profile.models import Profile
 
 DEFAULT_IGNORES = (".git/", ".venv/", "build/", "dist/", "__pycache__/")
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryFile:
+    """A checked regular file yielded by the bounded repository traversal."""
+
+    relative: str
+    path: Path
+    size: int
 
 
 def _resolves_under_root(root: Path, candidate: Path) -> bool:
@@ -64,62 +74,10 @@ class FileCollector:
     name = "files"
 
     def collect(self, context: AuditContext, profile: Profile) -> tuple[Evidence, ...]:
-        root = context.root.resolve(strict=True)
-        deadline = time.monotonic() + context.timeout_seconds
-        ignores = _ignore_spec(root, context.max_read_bytes, deadline)
-        paths: list[str] = []
-        sizes: dict[str, int] = {}
-        total = 0
-        directories = [root]
-        scan_failure: RuntimeFailure | None = None
-        while directories:
-            _raise_if_timed_out(deadline)
-            directory = directories.pop()
-            try:
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        _raise_if_timed_out(deadline)
-                        candidate = Path(entry.path)
-                        relative = candidate.relative_to(root).as_posix()
-                        if entry.is_dir(follow_symlinks=False):
-                            if (
-                                _is_link_or_junction(candidate)
-                                or ignores.match_file(f"{relative}/")
-                                or not _resolves_under_root(root, candidate)
-                            ):
-                                continue
-                            directories.append(candidate)
-                            continue
-                        if (
-                            ignores.match_file(relative)
-                            or not entry.is_file(follow_symlinks=False)
-                            or _is_link_or_junction(candidate)
-                            or not _resolves_under_root(root, candidate)
-                        ):
-                            continue
-                        size = entry.stat(follow_symlinks=False).st_size
-                        paths.append(relative)
-                        sizes[relative] = size
-                        total += size
-                        if len(paths) > context.max_files:
-                            raise RuntimeFailure(
-                                "Repository exceeds candidate file limit.",
-                                "Reduce scope or ignored paths.",
-                            )
-                        if total > context.max_total_bytes:
-                            raise RuntimeFailure(
-                                "Repository exceeds total byte limit.",
-                                "Reduce scope or ignored paths.",
-                            )
-            except OSError:
-                scan_failure = RuntimeFailure(
-                    "Unable to enumerate repository.",
-                    "Check repository readability or reduce scope.",
-                )
-                break
-        if scan_failure is not None:
-            raise scan_failure
-        ordered = tuple(sorted(paths))
+        files = repository_files(context)
+        ordered = tuple(file.relative for file in files)
+        sizes = {file.relative: file.size for file in files}
+        total = sum(file.size for file in files)
         return (
             Evidence(
                 id="files.inventory",
@@ -134,3 +92,73 @@ class FileCollector:
                 provenance=collector_provenance(context, self.name),
             ),
         )
+
+
+def repository_files(
+    context: AuditContext, *, deadline: float | None = None
+) -> tuple[RepositoryFile, ...]:
+    """Return checked, ignore-aware regular files in deterministic repository order."""
+    active_deadline = (
+        deadline if deadline is not None else time.monotonic() + context.timeout_seconds
+    )
+    _raise_if_timed_out(active_deadline)
+    try:
+        root = context.root.resolve(strict=True)
+    except OSError:
+        raise RuntimeFailure(
+            "Unable to enumerate repository.", "Check repository readability or reduce scope."
+        ) from None
+    _raise_if_timed_out(active_deadline)
+    ignores = _ignore_spec(root, context.max_read_bytes, active_deadline)
+    files: list[RepositoryFile] = []
+    total = 0
+    directories = [root]
+    scan_failed = False
+    while directories:
+        _raise_if_timed_out(active_deadline)
+        directory = directories.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    _raise_if_timed_out(active_deadline)
+                    candidate = Path(entry.path)
+                    relative = candidate.relative_to(root).as_posix()
+                    if entry.is_dir(follow_symlinks=False):
+                        if (
+                            _is_link_or_junction(candidate)
+                            or ignores.match_file(f"{relative}/")
+                            or not _resolves_under_root(root, candidate)
+                        ):
+                            continue
+                        directories.append(candidate)
+                        continue
+                    if (
+                        ignores.match_file(relative)
+                        or not entry.is_file(follow_symlinks=False)
+                        or _is_link_or_junction(candidate)
+                        or not _resolves_under_root(root, candidate)
+                    ):
+                        continue
+                    size = entry.stat(follow_symlinks=False).st_size
+                    files.append(RepositoryFile(relative, candidate, size))
+                    total += size
+                    if len(files) > context.max_files:
+                        raise RuntimeFailure(
+                            "Repository exceeds candidate file limit.",
+                            "Reduce scope or ignored paths.",
+                        )
+                    if total > context.max_total_bytes:
+                        raise RuntimeFailure(
+                            "Repository exceeds total byte limit.",
+                            "Reduce scope or ignored paths.",
+                        )
+        except RuntimeFailure:
+            raise
+        except OSError:
+            scan_failed = True
+            break
+    if scan_failed:
+        raise RuntimeFailure(
+            "Unable to enumerate repository.", "Check repository readability or reduce scope."
+        )
+    return tuple(sorted(files, key=lambda file: file.relative))
