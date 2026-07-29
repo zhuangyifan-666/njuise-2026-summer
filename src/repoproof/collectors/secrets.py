@@ -85,9 +85,7 @@ def _allowlisted_for(
     fingerprint: str,
 ) -> tuple[str, ...]:
     return tuple(
-        rule_id
-        for rule_id in triggered_ids
-        if (rule_id, relative, fingerprint) in allowlist
+        rule_id for rule_id in triggered_ids if (rule_id, relative, fingerprint) in allowlist
     )
 
 
@@ -215,6 +213,7 @@ class SecretCollector:
                     "path": file.relative,
                     "line": 1,
                     "fingerprint": fingerprint,
+                    "triggered_for": ids,
                     "allowlisted_for": _allowlisted_for(ids, allowlist, file.relative, fingerprint),
                 }
             )
@@ -253,8 +252,14 @@ class SecretCollector:
                         if newline:
                             local_matches.extend(
                                 self._classify(
-                                    bytes(line), len(line), relative, line_number, rules, allowlist,
-                                    capacity - len(local_matches), local_seen,
+                                    bytes(line),
+                                    len(line),
+                                    relative,
+                                    line_number,
+                                    rules,
+                                    allowlist,
+                                    capacity - len(local_matches),
+                                    local_seen,
                                 )
                             )
                             line.clear()
@@ -265,8 +270,14 @@ class SecretCollector:
                 if line:
                     local_matches.extend(
                         self._classify(
-                            bytes(line), len(line), relative, line_number, rules, allowlist,
-                            capacity - len(local_matches), local_seen,
+                            bytes(line),
+                            len(line),
+                            relative,
+                            line_number,
+                            rules,
+                            allowlist,
+                            capacity - len(local_matches),
+                            local_seen,
                         )
                     )
                 if os.fstat(opened.stream.fileno()).st_size > max_read_bytes:
@@ -313,6 +324,7 @@ class SecretCollector:
             if match.key not in seen and len(found_matches) < capacity:
                 seen.add(match.key)
                 found_matches.append(match)
+
         token_rules = _applicable_rules(rules, relative, "token")
         if token_rules:
             for pattern in TOKEN_PATTERNS:
@@ -350,9 +362,7 @@ class SecretCollector:
             entropy = shannon_entropy(raw.decode("ascii", "ignore"))
             triggered = tuple(
                 sorted(
-                    rule.id
-                    for rule in entropy_rules
-                    if entropy >= rule.params.entropy_threshold
+                    rule.id for rule in entropy_rules if entropy >= rule.params.entropy_threshold
                 )
             )
             if triggered:
@@ -381,6 +391,7 @@ class SecretCollector:
                 "path": relative,
                 "line": line_number,
                 "fingerprint": fingerprint,
+                "triggered_for": triggered_ids,
                 "allowlisted_for": _allowlisted_for(
                     triggered_ids, allowlist, relative, fingerprint
                 ),

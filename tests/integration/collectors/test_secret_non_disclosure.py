@@ -35,8 +35,7 @@ def _traceback_contains(exception: BaseException, marker: str) -> bool:
         trace = trace.tb_next
     detailed = traceback.TracebackException.from_exception(exception, capture_locals=True)
     return any(
-        "/src/repoproof/" in frame.filename.replace("\\", "/")
-        and marker in repr(frame.locals)
+        "/src/repoproof/" in frame.filename.replace("\\", "/") and marker in repr(frame.locals)
         for frame in detailed.stack
     )
 
@@ -70,6 +69,7 @@ def test_token_match_contains_only_safe_metadata(tmp_path: Path) -> None:
         "path": "config.txt",
         "line": 1,
         "fingerprint": hashlib.sha256(CANARY.encode()).hexdigest()[:8],
+        "triggered_for": ("security.secrets",),
         "allowlisted_for": (),
     }
     assert CANARY not in repr(evidence)
@@ -333,6 +333,7 @@ def test_private_key_and_assignment_split_across_boundaries_are_not_truncated(
 
 def test_read_budget_uses_probe_bytes_without_a_second_read(tmp_path: Path) -> None:
     """Catches a binary probe that rereads content or exceeds the real byte budget."""
+
     class CountingStream(io.BytesIO):
         def __init__(self, payload: bytes) -> None:
             super().__init__(payload)
@@ -409,4 +410,5 @@ def test_high_entropy_allowlist_uses_only_rules_whose_threshold_triggered(tmp_pa
     match = evidence.facts["matches"][0]
 
     assert match["category"] == "high_entropy"
+    assert match["triggered_for"] == ("security.low",)
     assert match["allowlisted_for"] == ("security.low",)

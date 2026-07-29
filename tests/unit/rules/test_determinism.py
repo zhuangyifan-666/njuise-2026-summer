@@ -76,6 +76,7 @@ def test_duplicate_secret_matches_have_canonical_locations_and_details() -> None
                     "path": "z.py",
                     "line": 2,
                     "fingerprint": "b",
+                    "triggered_for": ("security.secrets",),
                     "allowlisted_for": (),
                 },
                 {
@@ -83,6 +84,7 @@ def test_duplicate_secret_matches_have_canonical_locations_and_details() -> None
                     "path": "a.py",
                     "line": 1,
                     "fingerprint": "a",
+                    "triggered_for": ("security.secrets",),
                     "allowlisted_for": (),
                 },
                 {
@@ -90,6 +92,7 @@ def test_duplicate_secret_matches_have_canonical_locations_and_details() -> None
                     "path": "z.py",
                     "line": 2,
                     "fingerprint": "b",
+                    "triggered_for": ("security.secrets",),
                     "allowlisted_for": (),
                 },
             )

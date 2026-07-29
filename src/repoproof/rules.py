@@ -40,8 +40,16 @@ def required_collector_names(profile: Profile, offline: bool) -> tuple[str, ...]
             names.add("files")
 
     wants_remote = any(
-        (isinstance(rule, GitHistoryRule) and rule.params.accept_remote_pr)
-        or (isinstance(rule, DistributionReadyRule) and rule.params.accept_published_release)
+        (
+            isinstance(rule, GitHistoryRule)
+            and rule.params.require_non_default_branch
+            and rule.params.accept_remote_pr
+        )
+        or (
+            isinstance(rule, DistributionReadyRule)
+            and rule.params.require_release_workflow
+            and rule.params.accept_published_release
+        )
         for rule in profile.rules
     )
     if wants_remote and not offline:
@@ -77,6 +85,21 @@ def _find(evidence: Sequence[Evidence], kind: str, subject: str | None = None) -
         item
         for item in evidence
         if item.kind == kind and (subject is None or item.subject == subject)
+    ]
+    return min(candidates, key=_evidence_key) if candidates else None
+
+
+def _find_ci(evidence: Sequence[Evidence], rule: CIJobExistsRule) -> Evidence | None:
+    expected_id = f"ci:{rule.params.ci}:{rule.params.path}"
+    candidates = [
+        item
+        for item in evidence
+        if (
+            item.id == expected_id
+            and item.kind == "ci_config"
+            and item.subject == rule.params.path
+            and item.provenance.get("ci") == rule.params.ci
+        )
     ]
     return min(candidates, key=_evidence_key) if candidates else None
 
@@ -188,7 +211,7 @@ def _markdown(rule: MarkdownSectionsRule, evidence: Sequence[Evidence]) -> Findi
 
 
 def _ci(rule: CIJobExistsRule, evidence: Sequence[Evidence]) -> Finding:
-    item = _find(evidence, "ci_config", rule.params.path)
+    item = _find_ci(evidence, rule)
     if item is None or item.state is not EvidenceState.AVAILABLE:
         return _result(rule, None, f"CI evidence unavailable for {rule.params.path}.")
     jobs = _strings(item.facts.get("jobs"))
@@ -210,6 +233,15 @@ def _remote_process(remote: Evidence | None) -> tuple[bool | None, str | None]:
     return (count > 0, remote.id) if count is not None and count >= 0 else (None, remote.id)
 
 
+def _alternatives(*values: bool | None) -> bool | None:
+    """Combine accepted proof alternatives without turning unknown evidence into false."""
+    if any(value is True for value in values):
+        return True
+    if any(value is None for value in values):
+        return None
+    return False
+
+
 def _git(rule: GitHistoryRule, evidence: Sequence[Evidence]) -> Finding:
     local = _find(evidence, "git_history")
     if local is None or local.state is not EvidenceState.AVAILABLE:
@@ -224,7 +256,7 @@ def _git(rule: GitHistoryRule, evidence: Sequence[Evidence]) -> Finding:
 
     default = local.facts.get("default_branch")
     branches = _strings(local.facts.get("branches"))
-    if not isinstance(default, str) or branches is None:
+    if not isinstance(default, str) or not default or branches is None or default not in branches:
         return _result(rule, None, "Git branch evidence is insufficient.", (local.id,))
     if not any(branch != default for branch in branches):
         return _result(rule, False, "No non-default branch evidence.", (local.id,))
@@ -236,20 +268,21 @@ def _git(rule: GitHistoryRule, evidence: Sequence[Evidence]) -> Finding:
             local_process = None
         else:
             local_process = merges > 0
-    if local_process is True:
-        return _result(rule, True, "Git history requirements checked.", (local.id,))
-    if not rule.params.accept_remote_pr:
-        if local_process is None:
-            return _result(rule, None, "Local merge evidence is insufficient.", (local.id,))
-        return _result(rule, False, "No accepted merge evidence.", (local.id,))
-
-    remote = _find(evidence, "github_repository")
-    remote_process, remote_id = _remote_process(remote)
-    evidence_ids = (local.id,) + ((remote_id,) if remote_id else ())
-    if remote_process is None:
-        return _result(rule, None, "Remote PR evidence is unavailable.", evidence_ids)
-    if remote_process:
+    alternatives: list[bool | None] = []
+    if rule.params.accept_local_merge:
+        alternatives.append(local_process)
+    evidence_ids: tuple[str, ...] = (local.id,)
+    if rule.params.accept_remote_pr:
+        remote = _find(evidence, "github_repository")
+        remote_process, remote_id = _remote_process(remote)
+        alternatives.append(remote_process)
+        if remote_id is not None:
+            evidence_ids = (*evidence_ids, remote_id)
+    process = _alternatives(*alternatives)
+    if process is True:
         return _result(rule, True, "Git history requirements checked.", evidence_ids)
+    if process is None:
+        return _result(rule, None, "Git process evidence is unavailable.", evidence_ids)
     return _result(rule, False, "No accepted merge or pull request evidence.", evidence_ids)
 
 
@@ -266,47 +299,38 @@ def _distribution(rule: DistributionReadyRule, evidence: Sequence[Evidence]) -> 
     evidence_ids: tuple[str, ...] = (local.id,)
     if rule.params.required_paths:
         inventory = _find(evidence, "file_inventory")
-        if inventory is not None:
-            if inventory.state is not EvidenceState.AVAILABLE:
-                return _result(rule, None, "Required-path evidence is unavailable.", evidence_ids)
-            paths = _strings(inventory.facts.get("paths"))
-            if paths is None:
-                return _result(
-                    rule,
-                    None,
-                    "Required-path evidence is insufficient.",
-                    (*evidence_ids, inventory.id),
-                )
-            evidence_ids = (*evidence_ids, inventory.id)
-            if not all(path in paths for path in rule.params.required_paths):
-                return _result(
-                    rule, False, "Required distribution paths are missing.", evidence_ids
-                )
+        if inventory is None or inventory.state is not EvidenceState.AVAILABLE:
+            return _result(rule, None, "Required-path evidence is unavailable.", evidence_ids)
+        paths = _strings(inventory.facts.get("paths"))
+        if paths is None:
+            return _result(
+                rule,
+                None,
+                "Required-path evidence is insufficient.",
+                (*evidence_ids, inventory.id),
+            )
+        evidence_ids = (*evidence_ids, inventory.id)
+        if not all(path in paths for path in rule.params.required_paths):
+            return _result(rule, False, "Required distribution paths are missing.", evidence_ids)
 
     if not rule.params.require_release_workflow:
         return _result(rule, True, "Packaging and release readiness checked.", evidence_ids)
     local_release = _boolean(local.facts.get("release_workflow"))
-    if local_release is None:
-        return _result(rule, None, "Release-workflow evidence is insufficient.", evidence_ids)
-    if local_release:
+    alternatives: list[bool | None] = [local_release]
+    if rule.params.accept_published_release:
+        remote = _find(evidence, "github_repository")
+        if remote is None or remote.state is not EvidenceState.AVAILABLE:
+            alternatives.append(None)
+        else:
+            has_release = _boolean(remote.facts.get("has_release"))
+            alternatives.append(has_release)
+            evidence_ids = (*evidence_ids, remote.id)
+    release = _alternatives(*alternatives)
+    if release is True:
         return _result(rule, True, "Packaging and release readiness checked.", evidence_ids)
-    if not rule.params.accept_published_release:
-        return _result(rule, False, "No release workflow evidence found.", evidence_ids)
-
-    remote = _find(evidence, "github_repository")
-    if remote is None or remote.state is not EvidenceState.AVAILABLE:
-        return _result(rule, None, "Published release evidence is unavailable.", evidence_ids)
-    has_release = _boolean(remote.facts.get("has_release"))
-    if has_release is None:
-        return _result(
-            rule, None, "Published release evidence is insufficient.", (*evidence_ids, remote.id)
-        )
-    return _result(
-        rule,
-        has_release,
-        "Packaging and release readiness checked." if has_release else "No release evidence found.",
-        (*evidence_ids, remote.id),
-    )
+    if release is None:
+        return _result(rule, None, "Release evidence is unavailable.", evidence_ids)
+    return _result(rule, False, "No release evidence found.", evidence_ids)
 
 
 def _secret_matches(
@@ -322,6 +346,7 @@ def _secret_matches(
         path = item.get("path")
         line = _integer(item.get("line"))
         fingerprint = item.get("fingerprint")
+        triggered = _strings(item.get("triggered_for"))
         allowlisted = _strings(item.get("allowlisted_for"))
         if (
             not isinstance(category, str)
@@ -329,12 +354,14 @@ def _secret_matches(
             or line is None
             or line < 1
             or not isinstance(fingerprint, str)
+            or triggered is None
             or allowlisted is None
         ):
             return None
         if (
             category in rule.params.categories
             and not any(fnmatch(path, pattern) for pattern in rule.params.exclude_paths)
+            and rule.id in triggered
             and rule.id not in allowlisted
         ):
             matches.add((path, category, line, fingerprint))
