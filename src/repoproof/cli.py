@@ -80,6 +80,12 @@ def _usage_exit(error: UsageFailure) -> Never:
     raise typer.Exit(2) from None
 
 
+def _has_unexpected_arguments(context: typer.Context) -> bool:
+    has_unexpected = bool(context.args)
+    context.args.clear()
+    return has_unexpected
+
+
 @app.callback()
 def main() -> None:
     """Audit repository release readiness."""
@@ -161,9 +167,18 @@ def profile_validate(profile_path: Path) -> None:
     typer.echo(f"valid profile: {profile.name} (schema {profile.schema})")
 
 
-@auth_app.command("login")
-def auth_login(host: str = typer.Option("github.com", "--host")) -> None:
+@auth_app.command("login", context_settings={"allow_extra_args": True})
+def auth_login(
+    context: typer.Context, host: str = typer.Option("github.com", "--host")
+) -> None:
     """Store a GitHub token with the system keyring's hidden terminal prompt."""
+    if _has_unexpected_arguments(context):
+        _usage_exit(
+            UsageFailure(
+                "auth login requires interactive input.",
+                "Run auth login in an interactive terminal.",
+            )
+        )
     try:
         _credential_store().login(host, _read_hidden_token())
         normalized = normalize_host(host)
@@ -179,9 +194,10 @@ def auth_status(host: str = typer.Option("github.com", "--host")) -> None:
         store = _credential_store()
         configured = "yes" if store.configured(host) else "no"
         backend = store.backend_name()
+        normalized = normalize_host(host)
     except UsageFailure as exc:
         _usage_exit(exc)
-    typer.echo(f"configured: {configured}\nbackend: {backend}")
+    typer.echo(f"host: {normalized}\nconfigured: {configured}\nbackend: {backend}")
 
 
 @auth_app.command("logout")
