@@ -1,0 +1,35 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.*
+secrets.*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Project-local generated output
+.superpowers/
+.repoproof/
+reports/
