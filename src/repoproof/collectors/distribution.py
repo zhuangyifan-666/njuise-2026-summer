@@ -20,6 +20,8 @@ PACKAGING = {
 }
 MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
 MAX_WORKFLOW_ALIASES = 50
+STRING_TAG = "tag:yaml.org,2002:str"
+SEQUENCE_TAG = "tag:yaml.org,2002:seq"
 
 
 def _raise_if_timed_out(deadline: float) -> None:
@@ -42,6 +44,21 @@ def _mapping_value(mapping: MappingNode, key: str) -> Node | None:
     return None
 
 
+def _has_tag_pattern(tags: Node | None) -> bool:
+    if isinstance(tags, ScalarNode):
+        return tags.tag == STRING_TAG and bool(tags.value.strip())
+    if isinstance(tags, SequenceNode):
+        return (
+            tags.tag == SEQUENCE_TAG
+            and bool(tags.value)
+            and all(
+                isinstance(tag, ScalarNode) and tag.tag == STRING_TAG and tag.value.strip()
+                for tag in tags.value
+            )
+        )
+    return False
+
+
 def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
     _raise_if_timed_out(deadline)
     if "release" not in path.name.casefold() or path.stat().st_size > read_limit:
@@ -61,12 +78,7 @@ def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
     push = _mapping_value(trigger, "push")
     if not isinstance(push, MappingNode):
         return False
-    tags = _mapping_value(push, "tags")
-    if isinstance(tags, ScalarNode):
-        return bool(tags.value.strip())
-    if isinstance(tags, SequenceNode):
-        return any(isinstance(tag, ScalarNode) and tag.value.strip() for tag in tags.value)
-    return False
+    return _has_tag_pattern(_mapping_value(push, "tags"))
 
 
 class DistributionCollector:

@@ -65,6 +65,50 @@ def test_unquoted_on_push_tags_is_a_release_trigger(tmp_path: Path) -> None:
     assert evidence.facts["release_workflow"] is True
 
 
+def test_boolean_scalar_tag_value_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches YAML booleans being accepted as nonempty tag-pattern strings."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text("on:\n  push:\n    tags: true\n", encoding="utf-8")
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
+def test_null_scalar_tag_value_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches YAML null values being accepted as nonempty tag-pattern strings."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text("on:\n  push:\n    tags: null\n", encoding="utf-8")
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
+@pytest.mark.parametrize("tags", ("[true, 'v*']", "['v*', null]"))
+def test_tag_sequence_with_non_string_entry_is_not_a_release_trigger(
+    tmp_path: Path, tags: str
+) -> None:
+    """Catches partially valid tag sequences that contain boolean or null values."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text(
+        f"on:\n  push:\n    tags: {tags}\n", encoding="utf-8"
+    )
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
 def test_literal_true_key_is_not_a_release_trigger(tmp_path: Path) -> None:
     """Catches coerced boolean YAML keys being accepted as GitHub's `on` trigger."""
     workflow = tmp_path / ".github" / "workflows"
