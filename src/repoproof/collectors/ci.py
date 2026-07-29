@@ -62,7 +62,9 @@ def _document_mapping(ci_type: str, text: str) -> dict[object, object]:
         return documents[1]
     if len(documents) == 1 and isinstance(documents[0], dict):
         return documents[0]
-    return {}
+    if len(documents) <= 1:
+        return {}
+    raise yaml.YAMLError("unsupported YAML document topology")
 
 
 class CICollector:

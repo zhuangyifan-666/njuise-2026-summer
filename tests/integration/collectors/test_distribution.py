@@ -52,6 +52,45 @@ def test_release_named_test_workflow_is_not_claimed_as_release_evidence(tmp_path
     assert evidence.facts["release_workflow"] is False
 
 
+def test_unquoted_on_push_tags_is_a_release_trigger(tmp_path: Path) -> None:
+    """Catches YAML loaders that coerce GitHub's ordinary unquoted `on` key away."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text("on:\n  push:\n    tags: ['v*']\n", encoding="utf-8")
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is True
+
+
+def test_literal_true_key_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches coerced boolean YAML keys being accepted as GitHub's `on` trigger."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text("true:\n  push:\n    tags: ['v*']\n", encoding="utf-8")
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
+def test_literal_yes_key_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches YAML 1.1's `yes` boolean spelling being accepted as a trigger key."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text("yes:\n  push:\n    tags: ['v*']\n", encoding="utf-8")
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
 def test_nested_job_with_tags_is_not_a_release_trigger(tmp_path: Path) -> None:
     """Catches release detection that mistakes a job input for an event trigger."""
     workflow = tmp_path / ".github" / "workflows"

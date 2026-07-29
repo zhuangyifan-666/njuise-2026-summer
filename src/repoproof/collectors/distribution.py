@@ -1,7 +1,9 @@
 import time
 from pathlib import Path
+from typing import cast
 
 import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken
 
 from repoproof.collectors.base import AuditContext, collector_provenance
@@ -33,6 +35,13 @@ def _paths_exist(context: AuditContext, paths: tuple[str, ...], deadline: float)
     return True
 
 
+def _mapping_value(mapping: MappingNode, key: str) -> Node | None:
+    for node_key, node_value in mapping.value:
+        if isinstance(node_key, ScalarNode) and node_key.value == key:
+            return cast(Node, node_value)
+    return None
+
+
 def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
     _raise_if_timed_out(deadline)
     if "release" not in path.name.casefold() or path.stat().st_size > read_limit:
@@ -42,21 +51,21 @@ def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
     if aliases > MAX_WORKFLOW_ALIASES:
         raise yaml.YAMLError("alias limit exceeded")
     _raise_if_timed_out(deadline)
-    document = yaml.safe_load(content)
+    document = yaml.compose(content, Loader=yaml.SafeLoader)
     _raise_if_timed_out(deadline)
-    if not isinstance(document, dict):
+    if not isinstance(document, MappingNode):
         return False
-    trigger = document.get("on") if "on" in document else document.get(True)
-    if not isinstance(trigger, dict):
+    trigger = _mapping_value(document, "on")
+    if not isinstance(trigger, MappingNode):
         return False
-    push = trigger.get("push")
-    if not isinstance(push, dict):
+    push = _mapping_value(trigger, "push")
+    if not isinstance(push, MappingNode):
         return False
-    tags = push.get("tags")
-    if isinstance(tags, str):
-        return bool(tags.strip())
-    if isinstance(tags, list):
-        return any(isinstance(tag, str) and tag.strip() for tag in tags)
+    tags = _mapping_value(push, "tags")
+    if isinstance(tags, ScalarNode):
+        return bool(tags.value.strip())
+    if isinstance(tags, SequenceNode):
+        return any(isinstance(tag, ScalarNode) and tag.value.strip() for tag in tags.value)
     return False
 
 

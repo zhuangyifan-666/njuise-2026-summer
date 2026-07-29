@@ -46,6 +46,19 @@ def test_legacy_gitlab_pages_job_is_reported(tmp_path: Path) -> None:
     assert evidence[0].facts["jobs"] == ("pages",)
 
 
+def test_unsupported_gitlab_multi_document_stream_is_limited(tmp_path: Path) -> None:
+    """Catches unsupported YAML document streams reported as empty available CI evidence."""
+    (tmp_path / ".gitlab-ci.yml").write_text(
+        "metadata:\n  owner: release\n---\nunit-test:\n  script: [python -m pytest]\n",
+        encoding="utf-8",
+    )
+
+    evidence = CICollector().collect(AuditContext(tmp_path, offline=True), load_profile("ai4se-b"))
+
+    assert evidence[0].state is EvidenceState.LIMITED
+    assert evidence[0].facts == {"reason": "unsafe_or_invalid_yaml"}
+
+
 def test_unsafe_yaml_tag_is_limited_without_executing_input(tmp_path: Path) -> None:
     """Catches unsafe YAML construction or treating a rejected tag as valid CI evidence."""
     (tmp_path / ".gitlab-ci.yml").write_text(
