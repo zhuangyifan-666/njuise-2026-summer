@@ -166,3 +166,56 @@ replaced target before that containment validation.
   capacity, so repeated occurrences do not displace later unique evidence.
 - Fresh gates: focused tests `35 passed, 5 skipped`; Ruff/mypy clean; full suite
   `92 passed, 5 skipped`; diff check clean apart from CRLF notices.
+
+## Formal review round 4/5
+
+- Windows now opens the audit root once with `CreateFileW`, validates that root
+  handle, and opens every descendant with `NtOpenFile`. Each
+  `OBJECT_ATTRIBUTES` supplies the validated immediate parent in
+  `RootDirectory` and only one relative component in `ObjectName`; no child
+  open reconstructs an absolute path.
+- Root, intermediate directories, and the final file use no delete sharing and
+  reparse-point opening. Descendants also use explicit directory/non-directory
+  options. Every opened handle receives `FileAttributeTagInfo`, expected-type,
+  and normalized final-handle containment validation before it can become the
+  next parent or a Python stream.
+- Native NT failures are translated with `RtlNtStatusToDosError` into only
+  `missing`, `unsafe`, or `operational`. Missing native support, failed handle
+  queries, and failed conversion all return sanitized operational status from a
+  raw-contained frame and fail closed. Only the validated final handle is
+  transferred to the CRT/Python stream; root and parent ownership remains
+  native and is closed in reverse order.
+- `SecretCollector.collect` records only the safe open-failure reason inside
+  `except SafeOpenFailure`, leaves that handler, and then raises its sanitized
+  `RuntimeFailure`. The outward failure has no cause, context, nested
+  `SafeOpenFailure`/`OSError`, OS detail, or raw exception traceback.
+
+### Round 4 TDD and diagnostic evidence
+
+- RED A: the focused Windows regression failed with
+  `AttributeError: module 'repoproof.security' has no attribute
+  '_open_windows_relative'`, demonstrating that the prior walk exposed only
+  absolute child opening. GREEN: the test observed parent-handle plus
+  single-component calls, replaced the final pathname with a junction
+  immediately before the native relative open, and reported `1 passed`; no
+  replacement content was returned.
+- RED B: fault injection reported the three-object chain
+  `RuntimeFailure -> SafeOpenFailure -> OSError`. GREEN: the complete
+  cause/context/traceback walk contained only the sanitized
+  `RuntimeFailure` and reported `1 passed`.
+- A real nested parent-relative regular-file read succeeded on this Windows
+  host. Repeating it 250 times in one process kept the process handle count at
+  `120 -> 120`.
+
+### Round 4 fresh verification
+
+- Task 3 + Task 6 focused command: `40 passed, 5 skipped`.
+- `python -m pytest -q`: `95 passed, 5 skipped`.
+- `python -m ruff check src tests`: clean.
+- `python -m mypy src`: `Success: no issues found in 19 source files`.
+- `git diff --check`: clean apart from expected CRLF conversion notices.
+
+### Round 4 concerns
+
+No known correctness or security blocker remains. The two previously deferred
+Minor report/history findings remain deliberately unchanged.

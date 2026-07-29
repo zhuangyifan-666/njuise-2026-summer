@@ -13,7 +13,7 @@ from repoproof.collectors.secrets import _READ_CHUNK_BYTES, SecretCollector
 from repoproof.errors import RuntimeFailure
 from repoproof.profile.loader import load_profile
 from repoproof.profile.models import Profile
-from repoproof.security import SafeRegularFile
+from repoproof.security import SafeOpenFailure, SafeRegularFile
 
 CANARY = "ghp_" + "0123456789abcdefghijklmnopqrstuvwxyz"
 
@@ -39,6 +39,23 @@ def _traceback_contains(exception: BaseException, marker: str) -> bool:
         and marker in repr(frame.locals)
         for frame in detailed.stack
     )
+
+
+def _exception_chain(exception: BaseException) -> tuple[BaseException, ...]:
+    pending = [exception]
+    seen: set[int] = set()
+    chain: list[BaseException] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        chain.append(current)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+    return tuple(chain)
 
 
 def test_token_match_contains_only_safe_metadata(tmp_path: Path) -> None:
@@ -180,6 +197,32 @@ def test_read_failure_traceback_never_retains_candidate_text(tmp_path: Path) -> 
             _collect(tmp_path)
 
     assert not _traceback_contains(error.value, marker)
+
+
+def test_safe_open_operational_failure_has_no_nested_raw_exception_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches sanitized RuntimeFailure raised while SafeOpenFailure is still handled."""
+    marker = "C:/private/replacement-junction-canary"
+    (tmp_path / "config.txt").write_text("placeholder", encoding="utf-8")
+
+    def poisoned_open(_root: Path, _relative: str) -> SafeRegularFile:
+        try:
+            raise OSError(marker)
+        except OSError as raw_error:
+            raise SafeOpenFailure("operational") from raw_error
+
+    monkeypatch.setattr("repoproof.collectors.secrets.open_regular_file", poisoned_open)
+    with pytest.raises(RuntimeFailure) as error:
+        _collect(tmp_path)
+
+    chain = _exception_chain(error.value)
+    assert chain == (error.value,)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+    assert not any(isinstance(item, (SafeOpenFailure, OSError)) for item in chain)
+    assert marker not in "".join(traceback.format_exception(error.value))
+    assert not any(_traceback_contains(item, marker) for item in chain)
 
 
 def test_timeout_traceback_never_retains_candidate_text(tmp_path: Path) -> None:

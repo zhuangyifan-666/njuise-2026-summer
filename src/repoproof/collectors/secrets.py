@@ -1,12 +1,11 @@
-from collections import Counter
-from dataclasses import dataclass
-from enum import StrEnum
-from fnmatch import fnmatch
 import math
 import os
 import re
 import time
-from pathlib import Path
+from collections import Counter
+from dataclasses import dataclass
+from enum import StrEnum
+from fnmatch import fnmatch
 
 from repoproof.allowlist import load_secret_allowlist
 from repoproof.collectors.base import AuditContext, collector_provenance
@@ -14,7 +13,12 @@ from repoproof.collectors.files import RepositoryFile, repository_files
 from repoproof.domain import Evidence, EvidenceState
 from repoproof.errors import RuntimeFailure
 from repoproof.profile.models import Profile, SecretScanRule
-from repoproof.security import SafeOpenFailure, SafeRegularFile, open_regular_file, short_fingerprint
+from repoproof.security import (
+    SafeOpenFailure,
+    SafeRegularFile,
+    open_regular_file,
+    short_fingerprint,
+)
 
 TOKEN_PATTERNS = (
     re.compile(rb"\bgh[pousr]_[A-Za-z0-9]{20,255}\b"),
@@ -119,14 +123,24 @@ class SecretCollector:
                 break
             if file.size > context.max_read_bytes:
                 continue
+            opened: SafeRegularFile | None = None
+            open_failure_reason: str | None = None
             try:
                 opened = open_regular_file(root, file.relative)
             except SafeOpenFailure as failure:
-                if failure.reason in {"missing", "unsafe"}:
-                    continue
+                open_failure_reason = failure.reason
+            if open_failure_reason in {"missing", "unsafe"}:
+                continue
+            if open_failure_reason is not None:
                 raise RuntimeFailure(
-                    "Unable to open repository file.", "Check repository readability or reduce scope."
-                ) from None
+                    "Unable to open repository file.",
+                    "Check repository readability or reduce scope.",
+                )
+            if opened is None:
+                raise RuntimeFailure(
+                    "Unable to open repository file.",
+                    "Check repository readability or reduce scope.",
+                )
             if opened.size > context.max_read_bytes:
                 opened.close()
                 continue
@@ -145,7 +159,8 @@ class SecretCollector:
                 raise RuntimeFailure("Secret scan timed out.", "Reduce scope or ignored paths.")
             if status is _ScanStatus.READ_FAILED:
                 raise RuntimeFailure(
-                    "Unable to read repository file.", "Check repository readability or reduce scope."
+                    "Unable to read repository file.",
+                    "Check repository readability or reduce scope.",
                 )
             if status is _ScanStatus.CLASSIFIER_FAILED:
                 raise RuntimeFailure(
@@ -334,7 +349,11 @@ class SecretCollector:
             raw = found.group(1)
             entropy = shannon_entropy(raw.decode("ascii", "ignore"))
             triggered = tuple(
-                sorted(rule.id for rule in entropy_rules if entropy >= rule.params.entropy_threshold)
+                sorted(
+                    rule.id
+                    for rule in entropy_rules
+                    if entropy >= rule.params.entropy_threshold
+                )
             )
             if triggered:
                 append(
