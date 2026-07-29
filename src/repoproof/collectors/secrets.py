@@ -219,6 +219,7 @@ class SecretCollector:
         fragment = b""
         line = bytearray()
         local_matches: list[_SafeMatch] = []
+        local_seen: set[tuple[str, str, int, str]] = set()
         line_number = 1
         remaining = max_read_bytes
         first = True
@@ -238,7 +239,7 @@ class SecretCollector:
                             local_matches.extend(
                                 self._classify(
                                     bytes(line), len(line), relative, line_number, rules, allowlist,
-                                    capacity - len(local_matches),
+                                    capacity - len(local_matches), local_seen,
                                 )
                             )
                             line.clear()
@@ -250,7 +251,7 @@ class SecretCollector:
                     local_matches.extend(
                         self._classify(
                             bytes(line), len(line), relative, line_number, rules, allowlist,
-                            capacity - len(local_matches),
+                            capacity - len(local_matches), local_seen,
                         )
                     )
                 if os.fstat(opened.stream.fileno()).st_size > max_read_bytes:
@@ -289,16 +290,20 @@ class SecretCollector:
         rules: tuple[SecretScanRule, ...],
         allowlist: frozenset[tuple[str, str, str]],
         capacity: int,
+        seen: set[tuple[str, str, int, str]],
     ) -> tuple[_SafeMatch, ...]:
         found_matches: list[_SafeMatch] = []
+
+        def append(match: _SafeMatch) -> None:
+            if match.key not in seen and len(found_matches) < capacity:
+                seen.add(match.key)
+                found_matches.append(match)
         token_rules = _applicable_rules(rules, relative, "token")
         if token_rules:
             for pattern in TOKEN_PATTERNS:
                 for found in pattern.finditer(window):
-                    if len(found_matches) >= capacity:
-                        return tuple(found_matches)
                     if found.end() <= cutoff:
-                        found_matches.append(
+                        append(
                             SecretCollector._safe_match(
                                 "token",
                                 found.group(0),
@@ -311,10 +316,8 @@ class SecretCollector:
         private_rules = _applicable_rules(rules, relative, "private_key")
         if private_rules:
             for found in PRIVATE_KEY.finditer(window):
-                if len(found_matches) >= capacity:
-                    return tuple(found_matches)
                 if found.end() <= cutoff:
-                    found_matches.append(
+                    append(
                         SecretCollector._safe_match(
                             "private_key",
                             found.group(0),
@@ -326,8 +329,6 @@ class SecretCollector:
                     )
         entropy_rules = _applicable_rules(rules, relative, "high_entropy")
         for found in ASSIGNMENT.finditer(window):
-            if len(found_matches) >= capacity:
-                return tuple(found_matches)
             if found.end(1) > cutoff:
                 continue
             raw = found.group(1)
@@ -336,7 +337,7 @@ class SecretCollector:
                 sorted(rule.id for rule in entropy_rules if entropy >= rule.params.entropy_threshold)
             )
             if triggered:
-                found_matches.append(
+                append(
                     SecretCollector._safe_match(
                         "high_entropy", raw, triggered, relative, line_number, allowlist
                     )

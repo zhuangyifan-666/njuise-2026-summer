@@ -68,28 +68,12 @@ def _open_regular_posix(root: Path, parts: tuple[str, ...]) -> SafeRegularFile:
 
 
 def _open_regular_windows(root: Path, relative: str) -> SafeRegularFile:
-    """Open the final component itself and validate its opened-handle target.
-
-    FILE_FLAG_OPEN_REPARSE_POINT prevents following a final replaced link. Parent
-    components are validated both before opening and by the final handle path;
-    no content is read before the containment decision.
-    """
+    """Walk Windows components with pinned no-reparse handles before reading."""
     import ctypes
     import msvcrt
     from ctypes import wintypes
 
-    candidate = root.joinpath(*_checked_relative_parts(relative))
-    current = root
-    for part in _checked_relative_parts(relative):
-        current = current / part
-        try:
-            attributes = current.lstat().st_file_attributes
-        except FileNotFoundError as exc:
-            raise SafeOpenFailure("missing") from exc
-        except OSError as exc:
-            raise SafeOpenFailure("operational") from exc
-        if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-            raise SafeOpenFailure("unsafe")
+    parts = _checked_relative_parts(relative)
     create_file = ctypes.windll.kernel32.CreateFileW
     create_file.argtypes = [
         wintypes.LPCWSTR,
@@ -101,43 +85,77 @@ def _open_regular_windows(root: Path, relative: str) -> SafeRegularFile:
         wintypes.HANDLE,
     ]
     create_file.restype = wintypes.HANDLE
-    handle = create_file(
-        str(candidate),
-        0x80000000,
-        0x00000001,
-        None,
-        3,
-        0x00200000,
-        None,
-    )
     invalid_handle = wintypes.HANDLE(-1).value
-    if handle == invalid_handle:
-        raise SafeOpenFailure("operational")
-    descriptor: int | None = None
-    try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
-        file_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(file_stat.st_mode):
+    close_handle = ctypes.windll.kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+    get_info = ctypes.windll.kernel32.GetFileInformationByHandleEx
+    get_info.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
+    get_info.restype = wintypes.BOOL
+
+    class AttributeTagInfo(ctypes.Structure):
+        _fields_ = [("attributes", wintypes.DWORD), ("tag", wintypes.DWORD)]
+
+    def open_component(path: Path, final: bool) -> int:
+        access = 0x80000000 if final else 0x00000080
+        flags = 0x00200000 | (0 if final else 0x02000000)
+        handle = create_file(str(path), access, 0x00000003, None, 3, flags, None)
+        if handle == invalid_handle:
+            error = ctypes.windll.kernel32.GetLastError()
+            if error in {2, 3}:
+                raise SafeOpenFailure("missing")
+            raise SafeOpenFailure("operational")
+        info = AttributeTagInfo()
+        if not get_info(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            close_handle(handle)
+            raise SafeOpenFailure("operational")
+        if info.attributes & 0x00000400 or info.tag or (final and info.attributes & 0x00000010):
+            close_handle(handle)
             raise SafeOpenFailure("unsafe")
+        return int(handle)
+
+    handles: list[int] = []
+    descriptor: int | None = None
+    final_handle: int | None = None
+    try:
+        current = root
+        handles.append(open_component(current, False))
+        for part in parts[:-1]:
+            current = current / part
+            handles.append(open_component(current, False))
+        final_handle = open_component(current / parts[-1], True)
         buffer = ctypes.create_unicode_buffer(32768)
-        length = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle, buffer, len(buffer), 0)
+        length = ctypes.windll.kernel32.GetFinalPathNameByHandleW(
+            final_handle, buffer, len(buffer), 0
+        )
         if not length or length >= len(buffer):
             raise SafeOpenFailure("operational")
         final_name = buffer.value.removeprefix("\\\\?\\")
         try:
             Path(final_name).resolve(strict=True).relative_to(root.resolve(strict=True))
-        except (OSError, ValueError) as exc:
-            raise SafeOpenFailure("unsafe") from exc
+        except ValueError:
+            raise SafeOpenFailure("unsafe") from None
+        except OSError:
+            raise SafeOpenFailure("operational") from None
+        descriptor = msvcrt.open_osfhandle(final_handle, os.O_RDONLY | os.O_BINARY)
+        final_handle = None
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise SafeOpenFailure("unsafe")
         stream = os.fdopen(descriptor, "rb", closefd=True)
         descriptor = None
         return SafeRegularFile(stream, file_stat.st_size)
-    except FileNotFoundError as exc:
-        raise SafeOpenFailure("missing") from exc
-    except OSError as exc:
-        raise SafeOpenFailure("operational") from exc
+    except SafeOpenFailure:
+        raise
+    except OSError:
+        raise SafeOpenFailure("operational") from None
     finally:
         if descriptor is not None:
             os.close(descriptor)
+        if final_handle is not None:
+            close_handle(final_handle)
+        for handle in reversed(handles):
+            close_handle(handle)
 
 
 def open_regular_file(root: Path, relative: str) -> SafeRegularFile:

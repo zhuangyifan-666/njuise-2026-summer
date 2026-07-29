@@ -152,3 +152,17 @@ replaced target before that containment validation.
   Ruff clean; mypy `Success: no issues found in 19 source files`; full suite
   `92 passed, 5 skipped`; `git diff --check` clean apart from expected CRLF
   notices.
+
+## Formal review round 3/5
+
+- Windows regular-file opening now walks the audit root and each parent with
+  pinned `CreateFileW` handles, `OPEN_REPARSE_POINT`, no delete sharing, and
+  per-handle attribute/tag validation before opening the child. Parents use
+  backup-semantics handles and remain open through final containment/type
+  validation.
+- Safe-open reports sanitized missing/unsafe/operational reasons; missing and
+  unsafe candidates can be skipped while operational errors fail closed.
+- Raw classification deduplicates safe match keys before consuming per-file
+  capacity, so repeated occurrences do not displace later unique evidence.
+- Fresh gates: focused tests `35 passed, 5 skipped`; Ruff/mypy clean; full suite
+  `92 passed, 5 skipped`; diff check clean apart from CRLF notices.

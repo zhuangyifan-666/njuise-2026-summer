@@ -221,6 +221,23 @@ def test_match_cap_stops_inside_raw_helper(tmp_path: Path) -> None:
     assert len(evidence.facts["matches"]) == 5
 
 
+def test_duplicate_matches_do_not_consume_unique_match_capacity(tmp_path: Path) -> None:
+    """Catches duplicate raw matches exhausting capacity before later unique evidence."""
+    first = "ghp_" + ("a" * 20)
+    second = "ghp_" + ("b" * 20)
+    third = "ghp_" + ("c" * 20)
+    (tmp_path / "config.txt").write_text(f"{first} {first} {second} {third}", encoding="utf-8")
+
+    with patch("repoproof.collectors.secrets._MAX_REPORTED_MATCHES", 2):
+        evidence = _collect(tmp_path)
+
+    assert evidence.state.value == "limited"
+    assert [item["fingerprint"] for item in evidence.facts["matches"]] == [
+        hashlib.sha256(first.encode()).hexdigest()[:8],
+        hashlib.sha256(second.encode()).hexdigest()[:8],
+    ]
+
+
 def test_stale_inventory_with_complete_token_and_trailing_growth_is_discarded(
     tmp_path: Path,
 ) -> None:
