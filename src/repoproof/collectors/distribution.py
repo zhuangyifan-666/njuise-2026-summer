@@ -1,6 +1,8 @@
-import re
 import time
 from pathlib import Path
+
+import yaml
+from yaml.tokens import AliasToken
 
 from repoproof.collectors.base import AuditContext, collector_provenance
 from repoproof.domain import Evidence, EvidenceState
@@ -15,7 +17,7 @@ PACKAGING = {
     "cargo": ("Cargo.toml",),
 }
 MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
-RELEASE_TAG_TRIGGER_RE = re.compile(r"^\s*tags\s*:", re.MULTILINE)
+MAX_WORKFLOW_ALIASES = 50
 
 
 def _raise_if_timed_out(deadline: float) -> None:
@@ -36,8 +38,26 @@ def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
     if "release" not in path.name.casefold() or path.stat().st_size > read_limit:
         return False
     content = path.read_text(encoding="utf-8")
+    aliases = sum(isinstance(token, AliasToken) for token in yaml.scan(content))
+    if aliases > MAX_WORKFLOW_ALIASES:
+        raise yaml.YAMLError("alias limit exceeded")
     _raise_if_timed_out(deadline)
-    return bool(RELEASE_TAG_TRIGGER_RE.search(content))
+    document = yaml.safe_load(content)
+    _raise_if_timed_out(deadline)
+    if not isinstance(document, dict):
+        return False
+    trigger = document.get("on") if "on" in document else document.get(True)
+    if not isinstance(trigger, dict):
+        return False
+    push = trigger.get("push")
+    if not isinstance(push, dict):
+        return False
+    tags = push.get("tags")
+    if isinstance(tags, str):
+        return bool(tags.strip())
+    if isinstance(tags, list):
+        return any(isinstance(tag, str) and tag.strip() for tag in tags)
+    return False
 
 
 class DistributionCollector:
@@ -84,6 +104,9 @@ class DistributionCollector:
         except (OSError, UnicodeDecodeError):
             state = EvidenceState.LIMITED
             facts = {"reason": "unreadable_repository"}
+        except yaml.YAMLError:
+            state = EvidenceState.LIMITED
+            facts = {"reason": "unsafe_or_invalid_workflow_yaml"}
         return (
             Evidence(
                 "distribution:local",

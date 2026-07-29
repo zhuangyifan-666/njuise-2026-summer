@@ -15,6 +15,8 @@ def test_atx_setext_and_completed_commit_evidence(tmp_path: Path) -> None:
     (tmp_path / "PLAN.md").write_text(
         "- [x] parser (`1a2b3c4`)\n"
         "- [x] malformed 1a2b3c4z\n"
+        "- [x] underscore 1a2b3c4_suffix\n"
+        "- [x] unicode 1a2b3c4汉\n"
         "- [x] too-short abcdef\n"
         "- [x] too-long 12345678901234567890123456789012345678901\n"
         "- [ ] release\n",
@@ -32,6 +34,8 @@ def test_atx_setext_and_completed_commit_evidence(tmp_path: Path) -> None:
         {"line": 2, "has_commit": False},
         {"line": 3, "has_commit": False},
         {"line": 4, "has_commit": False},
+        {"line": 5, "has_commit": False},
+        {"line": 6, "has_commit": False},
     )
 
 

@@ -22,6 +22,30 @@ def test_gitlab_jobs_exclude_reserved_keys(tmp_path: Path) -> None:
     assert "stages" not in evidence[0].facts["jobs"]
 
 
+def test_gitlab_spec_header_document_is_excluded_from_jobs(tmp_path: Path) -> None:
+    """Catches GitLab's optional preamble document being parsed as a CI job."""
+    (tmp_path / ".gitlab-ci.yml").write_text(
+        "spec:\n  inputs:\n    environment:\n      default: test\n---\n"
+        "stages: [test]\nunit-test:\n  script: [python -m pytest]\n",
+        encoding="utf-8",
+    )
+
+    evidence = CICollector().collect(AuditContext(tmp_path, offline=True), load_profile("ai4se-b"))
+
+    assert evidence[0].facts["jobs"] == ("unit-test",)
+
+
+def test_legacy_gitlab_pages_job_is_reported(tmp_path: Path) -> None:
+    """Catches valid legacy GitLab Pages jobs being discarded as global configuration."""
+    (tmp_path / ".gitlab-ci.yml").write_text(
+        "pages:\n  script: [build-docs]\n", encoding="utf-8"
+    )
+
+    evidence = CICollector().collect(AuditContext(tmp_path, offline=True), load_profile("ai4se-b"))
+
+    assert evidence[0].facts["jobs"] == ("pages",)
+
+
 def test_unsafe_yaml_tag_is_limited_without_executing_input(tmp_path: Path) -> None:
     """Catches unsafe YAML construction or treating a rejected tag as valid CI evidence."""
     (tmp_path / ".gitlab-ci.yml").write_text(

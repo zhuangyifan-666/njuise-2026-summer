@@ -22,7 +22,7 @@ GITLAB_RESERVED = {
     "before_script",
     "after_script",
     "cache",
-    "pages",
+    "spec",
 }
 
 
@@ -48,6 +48,21 @@ def _jobs(ci_type: str, mapping: dict[object, object]) -> tuple[str, ...]:
             sorted(str(key) for key, value in github_jobs.items() if isinstance(value, dict))
         )
     return tuple(sorted(str(key) for key, value in mapping.items() if _is_job(ci_type, key, value)))
+
+
+def _document_mapping(ci_type: str, text: str) -> dict[object, object]:
+    documents = list(yaml.safe_load_all(text))
+    if (
+        ci_type == "gitlab"
+        and len(documents) == 2
+        and isinstance(documents[0], dict)
+        and "spec" in documents[0]
+        and isinstance(documents[1], dict)
+    ):
+        return documents[1]
+    if len(documents) == 1 and isinstance(documents[0], dict):
+        return documents[0]
+    return {}
 
 
 class CICollector:
@@ -80,9 +95,8 @@ class CICollector:
                         if aliases > MAX_YAML_ALIASES:
                             raise yaml.YAMLError("alias limit exceeded")
                         _raise_if_timed_out(deadline)
-                        document = yaml.safe_load(text)
+                        mapping = _document_mapping(ci_type, text)
                         _raise_if_timed_out(deadline)
-                        mapping = document if isinstance(document, dict) else {}
                         facts = {"jobs": _jobs(ci_type, mapping)}
                         state = EvidenceState.AVAILABLE
             except (UnicodeDecodeError, yaml.YAMLError):

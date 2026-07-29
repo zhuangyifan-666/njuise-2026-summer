@@ -10,7 +10,7 @@ from repoproof.profile.models import MarkdownSectionsRule, Profile
 from repoproof.security import resolve_under_root
 
 MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
-COMMIT_RE = re.compile(r"(?<![0-9a-z])(?:[0-9a-f]{7,40})(?![0-9a-z])", re.IGNORECASE)
+COMMIT_RE = re.compile(r"(?<!\w)(?:[0-9a-f]{7,40})(?!\w)", re.IGNORECASE)
 CHECKED_RE = re.compile(r"^\s*[-*+]\s+\[[xX]\]\s+")
 
 

@@ -52,6 +52,52 @@ def test_release_named_test_workflow_is_not_claimed_as_release_evidence(tmp_path
     assert evidence.facts["release_workflow"] is False
 
 
+def test_nested_job_with_tags_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches release detection that mistakes a job input for an event trigger."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text(
+        "on:\n  push:\njobs:\n  release:\n    with:\n      tags: ['v*']\n",
+        encoding="utf-8",
+    )
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
+def test_block_scalar_tags_text_is_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches release detection that reads YAML block-scalar text as configuration."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text(
+        "notes: |\n  tags: ['v*']\non:\n  push:\n", encoding="utf-8"
+    )
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
+def test_pull_request_tags_are_not_a_release_trigger(tmp_path: Path) -> None:
+    """Catches release detection that accepts a tags value outside the push trigger."""
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "release.yml").write_text(
+        "on:\n  pull_request:\n    tags: ['v*']\n", encoding="utf-8"
+    )
+
+    evidence = DistributionCollector().collect(
+        AuditContext(tmp_path, offline=True), load_profile("ai4se-b")
+    )[0]
+
+    assert evidence.facts["release_workflow"] is False
+
+
 def test_workflow_collection_respects_candidate_limit(tmp_path: Path) -> None:
     """Catches unbounded static workflow scanning beyond the configured candidate limit."""
     workflow = tmp_path / ".github" / "workflows"
