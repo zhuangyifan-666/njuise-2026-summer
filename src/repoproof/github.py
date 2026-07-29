@@ -1,5 +1,6 @@
 """Sanitized, HTTPS-only access to the small GitHub evidence surface."""
 
+import json
 import math
 import re
 import time
@@ -19,6 +20,9 @@ _OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,255}")
 _ACTIONS_STATUS = re.compile(r"[a-z_]{1,32}")
+_MAX_RESPONSE_BYTES = 1024 * 1024
+_RESPONSE_CHUNK_BYTES = 64 * 1024
+_MAX_READ_TIMEOUT_SECONDS = 1.0
 
 
 class CredentialReader(Protocol):
@@ -149,11 +153,13 @@ class GitHubGateway:
             or self.timeout_seconds <= 0
         ):
             raise ValueError("GitHub base URL must use HTTPS")
+        if host == "github.com" and port not in {None, 443}:
+            raise ValueError("Public GitHub base URL must use HTTPS port 443")
         authority = host if port is None else f"{host}:{port}"
         self._host = host
         self._api_url = (
             "https://api.github.com"
-            if host == "github.com" and port is None
+            if host == "github.com"
             else f"https://{authority}/api/v3"
         )
 
@@ -182,6 +188,7 @@ class GitHubGateway:
         token: str | None = None
         response: httpx.Response | None = None
         headers: dict[str, str] = {}
+        body = bytearray()
         try:
             token = self.credentials.get(self._host)
             if not token:
@@ -193,21 +200,36 @@ class GitHubGateway:
                         "Authorization": f"Bearer {token}",
                         "Accept": "application/vnd.github+json",
                     }
-                    response = self.client.get(
+                    request_timeout = httpx.Timeout(
+                        timeout,
+                        read=min(timeout, _MAX_READ_TIMEOUT_SECONDS),
+                    )
+                    with self.client.stream(
+                        "GET",
                         f"{self._api_url}{path}",
                         params=params,
                         headers=headers,
-                        timeout=timeout,
-                    )
-                    if 200 <= response.status_code < 300:
-                        candidate = parser(response.json())
-                        if not _contains_token(candidate, token):
-                            result = candidate
-                            status = _RequestStatus.OK
+                        timeout=request_timeout,
+                    ) as response:
+                        within_limits = 200 <= response.status_code < 300
+                        if within_limits:
+                            for chunk in response.iter_bytes(_RESPONSE_CHUNK_BYTES):
+                                deadline_ok = self._remaining_timeout() > 0
+                                size_ok = len(body) + len(chunk) <= _MAX_RESPONSE_BYTES
+                                if not deadline_ok or not size_ok:
+                                    within_limits = False
+                                    break
+                                body.extend(chunk)
+                        if within_limits:
+                            candidate = parser(json.loads(body))
+                            if not _contains_token(candidate, token):
+                                result = candidate
+                                status = _RequestStatus.OK
         except Exception:
             status = _RequestStatus.REQUEST_FAILED
             result = None
         finally:
+            body.clear()
             token = None
             response = None
             headers = {}
