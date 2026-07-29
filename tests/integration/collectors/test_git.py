@@ -38,6 +38,7 @@ def test_git_history_counts_commits_and_merges(tmp_path: Path) -> None:
         "commit_count": 3,
         "branches": ("feature", "main"),
         "merge_count": 1,
+        "repository_slug": None,
     }
     assert evidence.provenance["collector"] == "git"
 

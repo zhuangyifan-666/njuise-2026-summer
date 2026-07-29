@@ -1,3 +1,4 @@
+import re
 import subprocess
 import threading
 import time
@@ -13,6 +14,21 @@ from repoproof.profile.models import Profile
 MAX_GIT_OUTPUT_BYTES = 1024 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
 _CLEANUP_TIMEOUT_SECONDS = 0.1
+_ORIGIN = re.compile(
+    r"^(?:https://github\.com/|git@github\.com:)"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)/"
+    r"(?P<repo>[A-Za-z0-9_.-]{1,100}?)(?:\.git)?$"
+)
+
+
+def repository_slug(origin_url: str) -> str | None:
+    """Extract only a safe, exact github.com owner/repository pair."""
+    if not isinstance(origin_url, str):
+        return None
+    match = _ORIGIN.fullmatch(origin_url.strip())
+    if match is None or match.group("repo") in {".", ".."}:
+        return None
+    return f"{match.group('owner')}/{match.group('repo')}"
 
 
 def _read_bounded_output(
@@ -153,6 +169,10 @@ class GitCollector:
                 )
             )
             merges = int(run(("rev-list", "--count", "--merges", "HEAD")))
+            try:
+                slug = repository_slug(run(("remote", "get-url", "origin")))
+            except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError):
+                slug = None
             facts: dict[str, object] = {
                 "is_repository": inside,
                 "current_branch": current,
@@ -164,6 +184,7 @@ class GitCollector:
                 "commit_count": commits,
                 "branches": branches,
                 "merge_count": merges,
+                "repository_slug": slug,
             }
             state = EvidenceState.AVAILABLE
         except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError):

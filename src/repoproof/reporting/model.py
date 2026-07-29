@@ -249,6 +249,8 @@ def build_report(
     diagnostics: Sequence[str],
     timings_ms: Mapping[str, int],
     generated_at: datetime,
+    *,
+    runtime_failed: bool = False,
 ) -> AuditReport:
     """Build the one immutable, deterministic report used by every renderer."""
     if generated_at.tzinfo is None or generated_at.utcoffset() is None:
@@ -267,7 +269,9 @@ def build_report(
         )
     )
     exit_code = (
-        ExitCode.FINDINGS
+        ExitCode.RUNTIME
+        if runtime_failed
+        else ExitCode.FINDINGS
         if any(item.status is FindingStatus.FAIL for item in ordered_findings)
         else ExitCode.OK
     )

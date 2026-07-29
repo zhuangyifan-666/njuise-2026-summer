@@ -7,9 +7,16 @@ import pytest
 from pytest import MonkeyPatch
 
 from repoproof.collectors.base import AuditContext
-from repoproof.collectors.git import GitCollector, GitRunner
+from repoproof.collectors.git import GitCollector, GitRunner, repository_slug
 from repoproof.domain import EvidenceState
 from repoproof.profile.loader import load_profile
+
+
+def test_repository_slug_accepts_only_safe_github_origins() -> None:
+    """Catches attacker-controlled or non-GitHub origins entering API paths."""
+    assert repository_slug("https://github.com/owner/repo.git") == "owner/repo"
+    assert repository_slug("git@github.com:owner/repo") == "owner/repo"
+    assert repository_slug("https://github.com.evil.invalid/owner/repo.git") is None
 
 
 class _CompletedProcess:
