@@ -12,7 +12,7 @@ def test_profile_list_contains_builtin() -> None:
     assert result.stdout == "ai4se-b\n"
 
 
-def test_profile_validate_reports_yaml_path_and_exits_two(tmp_path: Path) -> None:
+def test_profile_validate_reports_generic_fix_and_exits_two(tmp_path: Path) -> None:
     policy = tmp_path / "invalid.yml"
     policy.write_text(
         "schema: 1\nname: abc\ndescription: test\nrules:\n"
@@ -25,4 +25,5 @@ def test_profile_validate_reports_yaml_path_and_exits_two(tmp_path: Path) -> Non
     result = CliRunner().invoke(app, ["profile", "validate", str(policy)])
 
     assert result.exit_code == 2
-    assert "rules.0.path_exists.params.unknown" in result.stderr
+    assert "profile" in result.stderr.casefold()
+    assert "fix:" in result.stderr.casefold()

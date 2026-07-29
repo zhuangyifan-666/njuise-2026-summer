@@ -48,10 +48,10 @@ def load_profile(name_or_path: str) -> Profile:
         return Profile.model_validate(raw)
     except UsageFailure:
         raise
-    except (UnicodeDecodeError, yaml.YAMLError, ValidationError) as exc:
+    except (UnicodeDecodeError, yaml.YAMLError, ValidationError):
         raise UsageFailure(
-            "Profile is invalid.", f"Correct the reported YAML/schema error: {exc}"
-        ) from exc
+            "Profile is invalid.", "Correct the profile YAML or schema fields."
+        ) from None
 
 
 def profile_hash(profile: Profile) -> str:

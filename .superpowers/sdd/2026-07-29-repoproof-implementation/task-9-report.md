@@ -30,3 +30,16 @@ Verification evidence:
 Concern: non-offline profiles that require an unimplemented remote GitHub collector currently
 produce the controlled runtime exit 3 rather than silently skipping remote evidence. The offline
 audit path required by this task remains fully local and does not access GitHub.
+
+## Review fix round 1
+
+Malformed profile errors no longer interpolate PyYAML or Pydantic exception text into a
+`UsageFailure` remediation. The loader now returns stable generic profile/fix guidance and raises
+without an exception cause, preventing parser `input_value` content from reaching CLI diagnostics.
+The existing profile-validation test was adjusted to the safe generic contract, and one new audit
+CLI regression verifies that a recognizable credential-format canary is absent from stdout, stderr,
+and the captured exception representation while exit 2 and useful profile/fix guidance remain.
+
+Verification: RED exposed the canary in Pydantic `input_value` text; GREEN passed the new regression.
+The focused regression and current Task 9 audit tests passed, and the full suite passed with 171
+tests and 5 skips. Ruff, mypy, and `git diff --check` also passed.
