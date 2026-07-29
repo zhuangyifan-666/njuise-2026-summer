@@ -35,7 +35,18 @@ def test_malformed_profile_diagnostic_redacts_canary(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert canary not in result.stdout
     assert canary not in result.stderr
-    assert canary not in repr(result.exception)
+    pending = [result.exception]
+    seen: set[int] = set()
+    while pending:
+        exception = pending.pop()
+        if exception is None or id(exception) in seen:
+            continue
+        seen.add(id(exception))
+        detail = repr(exception)
+        assert canary not in detail
+        assert "ValidationError" not in detail
+        assert "input_value" not in detail
+        pending.extend((exception.__cause__, exception.__context__))
     assert "profile" in result.stderr.casefold()
     assert "fix:" in result.stderr.casefold()
 

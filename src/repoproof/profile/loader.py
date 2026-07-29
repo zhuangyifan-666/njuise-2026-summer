@@ -32,26 +32,36 @@ def _read_profile(name_or_path: str) -> bytes:
 
 def load_profile(name_or_path: str) -> Profile:
     data = _read_profile(name_or_path)
+    failure: tuple[str, str] | None = None
+    profile: Profile | None = None
     try:
         text = data.decode("utf-8")
         try:
             aliases = sum(isinstance(token, AliasToken) for token in yaml.scan(text))
         except yaml.YAMLError:
             if text.count("*") > MAX_ALIASES:
-                raise UsageFailure(
-                    "Profile exceeds 50 YAML aliases.", "Remove YAML alias expansion."
-                ) from None
-            raise
-        if aliases > MAX_ALIASES:
-            raise UsageFailure("Profile exceeds 50 YAML aliases.", "Remove YAML alias expansion.")
-        raw = yaml.safe_load(text)
-        return Profile.model_validate(raw)
-    except UsageFailure:
-        raise
+                failure = (
+                    "Profile exceeds 50 YAML aliases.",
+                    "Remove YAML alias expansion.",
+                )
+            else:
+                failure = ("Profile is invalid.", "Correct the profile YAML or schema fields.")
+        if failure is None:
+            if aliases > MAX_ALIASES:
+                failure = (
+                    "Profile exceeds 50 YAML aliases.",
+                    "Remove YAML alias expansion.",
+                )
+            else:
+                raw = yaml.safe_load(text)
+                profile = Profile.model_validate(raw)
     except (UnicodeDecodeError, yaml.YAMLError, ValidationError):
-        raise UsageFailure(
-            "Profile is invalid.", "Correct the profile YAML or schema fields."
-        ) from None
+        failure = ("Profile is invalid.", "Correct the profile YAML or schema fields.")
+    if failure is not None:
+        raise UsageFailure(*failure)
+    if profile is None:
+        raise AssertionError("Profile validation completed without a result.")
+    return profile
 
 
 def profile_hash(profile: Profile) -> str:

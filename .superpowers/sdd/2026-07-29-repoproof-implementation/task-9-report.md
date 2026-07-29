@@ -43,3 +43,17 @@ and the captured exception representation while exit 2 and useful profile/fix gu
 Verification: RED exposed the canary in Pydantic `input_value` text; GREEN passed the new regression.
 The focused regression and current Task 9 audit tests passed, and the full suite passed with 171
 tests and 5 skips. Ruff, mypy, and `git diff --check` also passed.
+
+## Review fix round 2
+
+The canary regression now traverses every reachable `__cause__` and `__context__` from the
+`CliRunner` exception and rejects the canary, `ValidationError`, and parser `input_value` detail
+at every node. RED showed that `raise ... from None` hid the error from normal display but retained
+the graph `SystemExit → UsageFailure → ValidationError`.
+
+`load_profile` now records only a fixed safe failure result while parser and validation handlers
+are active, then raises `UsageFailure` after leaving those handlers. This detaches raw parser and
+Pydantic exceptions instead of merely suppressing their displayed context.
+
+Verification: the enhanced regression and the Task 9 audit suite passed (6 tests); full pytest
+passed with 171 tests and 5 skips. Ruff, mypy, and `git diff --check` passed.
