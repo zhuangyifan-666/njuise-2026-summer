@@ -166,3 +166,95 @@ def test_report_model_redacts_recognized_canary_from_every_semantic_surface() ->
     assert all(canary not in surface for surface in surfaces)
     assert "docs.safe" in render_json(report)
     assert "<redacted:" in render_json(report)
+
+
+def test_sanitization_preserves_benign_identity_and_only_redacts_explicit_secrets() -> None:
+    long_identifier = "build-0123456789abcdef0123456789abcdef0123456789abcdef"
+    sha256_identifier = "a" * 64
+    profile = Profile.model_validate(
+        {
+            "schema": 1,
+            "name": "private-project",
+            "description": "test profile",
+            "manual_checks": ["token=optional"],
+            "rules": [
+                {
+                    "id": "docs.present",
+                    "type": "path_exists",
+                    "severity": "error",
+                    "params": {"paths": ["README.md"]},
+                    "remediation": "add README",
+                }
+            ],
+        }
+    )
+    report = build_report(
+        profile,
+        Path("ordinary-repository"),
+        (
+            Finding(
+                "docs.present",
+                FindingStatus.FAIL,
+                Severity.ERROR,
+                f"token=optional; identifier={long_identifier}",
+                (Location("certificates/public.pem", 8),),
+                (sha256_identifier,),
+                "keep private-project documentation",
+            ),
+        ),
+        ("private-project diagnostics",),
+        {long_identifier: 9},
+        datetime(2026, 7, 29, tzinfo=UTC),
+    )
+
+    finding = report.findings[0]
+    assert report.profile_name == "private-project"
+    assert report.manual_checks == ("token=optional",)
+    assert finding.rule_id == "docs.present"
+    assert finding.locations == (Location("certificates/public.pem", 8),)
+    assert finding.evidence_ids == (sha256_identifier,)
+    assert long_identifier in finding.message
+    assert report.timings_ms == {long_identifier: 9}
+
+
+def test_secret_scan_location_redacts_only_high_entropy_filename_component() -> None:
+    token_like_filename = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
+    profile = Profile.model_validate(
+        {
+            "schema": 1,
+            "name": "test-policy",
+            "description": "test profile",
+            "rules": [
+                {
+                    "id": "security.secrets",
+                    "type": "secret_scan",
+                    "severity": "error",
+                    "params": {"categories": ["high_entropy"]},
+                    "remediation": "remove secret",
+                }
+            ],
+        }
+    )
+    report = build_report(
+        profile,
+        Path("repo"),
+        (
+            Finding(
+                "security.secrets",
+                FindingStatus.FAIL,
+                Severity.ERROR,
+                "secret scan finding",
+                (Location(f"captures/{token_like_filename}.txt", 3),),
+                ("secrets:scan",),
+                "remove secret",
+            ),
+        ),
+        (),
+        {},
+        datetime(2026, 7, 29, tzinfo=UTC),
+    )
+
+    location = report.findings[0].locations[0]
+    assert location.path.startswith("captures/")
+    assert token_like_filename not in location.path
+    assert "<redacted:path:" in location.path

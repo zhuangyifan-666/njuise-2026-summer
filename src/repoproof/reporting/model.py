@@ -30,13 +30,12 @@ _SUMMARY_STATUSES = (
 _OSC_ESCAPE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
 _CSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _PRIVATE_KEY = re.compile(
-    r"-----BEGIN(?: [A-Z0-9]+)? PRIVATE KEY-----.{0,20000}?"
-    r"-----END(?: [A-Z0-9]+)? PRIVATE KEY-----",
-    re.IGNORECASE | re.DOTALL,
+    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+    re.IGNORECASE,
 )
 _ASSIGNMENT_SECRET = re.compile(
-    r"\b(?P<label>api[_-]?key|access[_-]?token|token|password|secret)\s*[:=]\s*"
-    r"(?P<secret>[^\s,;]+)",
+    r"\b(?P<label>api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?"
+    r"(?P<secret>[A-Za-z0-9_+/=-]{20,255})",
     re.IGNORECASE,
 )
 _TOKEN = re.compile(
@@ -44,11 +43,7 @@ _TOKEN = re.compile(
     r"sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16})(?![A-Za-z0-9_])"
 )
 _HIGH_ENTROPY = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9_+/=-]{32,}(?![A-Za-z0-9_])")
-_SENSITIVE_FILENAME = re.compile(
-    r"(?:^|[-_.])(?:api[-_]?key|credential|password|private|secret|token)(?:[-_.]|$)"
-    r"|\.(?:key|pem|p12|pfx)$",
-    re.IGNORECASE,
-)
+_SENSITIVE_SECRET_FILENAMES = frozenset({"id_rsa", "id_ed25519", ".env", "credentials.json"})
 
 
 def _fingerprint(value: str) -> str:
@@ -85,12 +80,7 @@ def _redact_secrets(value: str) -> str:
         value,
     )
     value = _TOKEN.sub(lambda match: _redaction("token", match.group(0)), value)
-    return _HIGH_ENTROPY.sub(
-        lambda match: _redaction("high-entropy", match.group(0))
-        if _has_high_entropy(match.group(0))
-        else match.group(0),
-        value,
-    )
+    return value
 
 
 def sanitize_text(value: object) -> str:
@@ -106,16 +96,28 @@ def sanitize_text(value: object) -> str:
 
 
 def sanitize_path(value: object) -> str:
-    """Sanitize a repository path and replace sensitive filename components wholesale."""
-    text = sanitize_text(value)
+    """Sanitize controls and explicit credential formats without changing ordinary path identity."""
+    return sanitize_text(value)
+
+
+def _sanitize_secret_scan_path(value: object) -> str:
+    """Redact only sensitive or high-entropy filename components from secret-scan findings."""
+    text = sanitize_path(value)
     parts = re.split(r"([/\\])", text)
-    return "".join(
-        _redaction("path", part)
-        if part not in {"/", "\\"}
-        and (_SENSITIVE_FILENAME.search(part) is not None or _has_high_entropy(part))
-        else part
-        for part in parts
-    )
+    sanitized: list[str] = []
+    for part in parts:
+        if part in {"/", "\\"}:
+            sanitized.append(part)
+            continue
+        stem, dot, suffix = part.rpartition(".")
+        entropy_candidate = stem if dot else part
+        if part.casefold() in _SENSITIVE_SECRET_FILENAMES:
+            sanitized.append(_redaction("path", part))
+        elif _has_high_entropy(entropy_candidate):
+            sanitized.append(f"{_redaction('path', entropy_candidate)}{dot}{suffix}")
+        else:
+            sanitized.append(part)
+    return "".join(sanitized)
 
 
 def normalize_console_text(value: object) -> str:
@@ -135,14 +137,15 @@ def _location_key(location: Location) -> tuple[str, int, bool]:
     return (location.path, line, location.line is None)
 
 
-def _canonical_finding(finding: Finding) -> Finding:
+def _canonical_finding(finding: Finding, *, is_secret_scan: bool) -> Finding:
+    sanitize_location = _sanitize_secret_scan_path if is_secret_scan else sanitize_path
     return replace(
         finding,
         rule_id=sanitize_text(finding.rule_id),
         message=sanitize_text(finding.message),
         locations=tuple(
             sorted(
-                (Location(sanitize_path(item.path), item.line) for item in finding.locations),
+                (Location(sanitize_location(item.path), item.line) for item in finding.locations),
                 key=_location_key,
             )
         ),
@@ -175,8 +178,17 @@ def build_report(
     if generated_at.tzinfo is None or generated_at.utcoffset() is None:
         raise ValueError("generated_at must be timezone-aware")
 
+    rule_types = {rule.id: rule.type for rule in profile.rules}
     ordered_findings = tuple(
-        sorted((_canonical_finding(item) for item in findings), key=_finding_key)
+        sorted(
+            (
+                _canonical_finding(
+                    item, is_secret_scan=rule_types.get(item.rule_id) == "secret_scan"
+                )
+                for item in findings
+            ),
+            key=_finding_key,
+        )
     )
     exit_code = (
         ExitCode.FINDINGS

@@ -47,6 +47,29 @@ class _FailingHandle:
         self.close()
 
 
+class _ReusingCloseHandle:
+    def __init__(self, descriptor: int, replacement: Path) -> None:
+        self.descriptor = descriptor
+        self.replacement = replacement
+        self.reused_descriptor: int | None = None
+
+    def write(self, content: str) -> int:
+        return len(content)
+
+    def flush(self) -> None:
+        return None
+
+    def fileno(self) -> int:
+        return self.descriptor
+
+    def close(self) -> None:
+        import os
+
+        os.close(self.descriptor)
+        self.reused_descriptor = os.open(self.replacement, os.O_RDWR)
+        raise OSError("close hook")
+
+
 def test_atomic_write_uses_utf8_lf_and_creates_parent_directory(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "report.json"
 
@@ -155,4 +178,36 @@ def test_flush_failure_preserves_its_error_and_cleans_temp(tmp_path: Path) -> No
             atomic_write_text(target, "secret content must not leak")
 
     assert target.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.glob(".report.json.*.tmp")) == []
+
+
+def test_close_hook_fd_reuse_does_not_close_unrelated_reopened_file(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text("still open", encoding="utf-8")
+    captured: dict[str, _ReusingCloseHandle] = {}
+
+    def reusing_handle(descriptor: int, *args: object, **kwargs: object) -> _ReusingCloseHandle:
+        handle = _ReusingCloseHandle(descriptor, replacement)
+        captured["handle"] = handle
+        return handle
+
+    with patch("repoproof.reporting.output.os.fdopen", side_effect=reusing_handle):
+        with pytest.raises(OSError, match="close hook"):
+            atomic_write_text(target, "new")
+
+    descriptor = captured["handle"].reused_descriptor
+    assert descriptor is not None
+    try:
+        import os
+
+        assert os.fstat(descriptor).st_size == len("still open")
+    finally:
+        import os
+
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    assert not target.exists()
     assert list(tmp_path.glob(".report.json.*.tmp")) == []

@@ -5,11 +5,23 @@ import tempfile
 from pathlib import Path
 from typing import TextIO
 
+type DescriptorIdentity = tuple[int, int]
 
-def _close_descriptor(descriptor: int | None) -> None:
+
+def _descriptor_identity(descriptor: int) -> DescriptorIdentity | None:
+    try:
+        info = os.fstat(descriptor)
+        return (info.st_dev, info.st_ino)
+    except BaseException:
+        return None
+
+
+def _close_descriptor(descriptor: int | None, identity: DescriptorIdentity | None = None) -> None:
     if descriptor is None:
         return
     try:
+        if identity is not None and _descriptor_identity(descriptor) != identity:
+            return
         os.close(descriptor)
     except BaseException:
         return
@@ -27,7 +39,7 @@ def _unlink_temp(temp: Path | None) -> None:
 def atomic_write_text(target: Path, content: str) -> None:
     """Write UTF-8 LF text atomically while preserving the first failure and traceback."""
     descriptor: int | None = None
-    stream_descriptor: int | None = None
+    descriptor_identity: DescriptorIdentity | None = None
     temp: Path | None = None
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -35,10 +47,9 @@ def atomic_write_text(target: Path, content: str) -> None:
             prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
         )
         temp = Path(raw_temp)
+        descriptor_identity = _descriptor_identity(descriptor)
         stream: TextIO
-        stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n")
-        stream_descriptor = descriptor
-        descriptor = None
+        stream = os.fdopen(descriptor, "w", encoding="utf-8", newline="\n", closefd=False)
         primary_failure = False
         try:
             normalized = content.replace("\r\n", "\n").replace("\r", "\n")
@@ -55,12 +66,11 @@ def atomic_write_text(target: Path, content: str) -> None:
                 if not primary_failure:
                     raise
             finally:
-                _close_descriptor(stream_descriptor)
-                stream_descriptor = None
+                _close_descriptor(descriptor, descriptor_identity)
+                descriptor = None
         os.replace(temp, target)
         temp = None
     except BaseException:
-        _close_descriptor(descriptor)
-        _close_descriptor(stream_descriptor)
+        _close_descriptor(descriptor, descriptor_identity)
         _unlink_temp(temp)
         raise
