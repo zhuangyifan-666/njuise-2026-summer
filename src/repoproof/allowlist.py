@@ -11,7 +11,7 @@ from yaml.tokens import AliasToken
 
 from repoproof.errors import UsageFailure
 from repoproof.profile.models import SafeRepoPath
-from repoproof.security import SafeOpenFailure, open_regular_file
+from repoproof.security import SafeOpenFailure, SafeRegularFile, open_regular_file
 
 MAX_ALLOWLIST_BYTES = 1024 * 1024
 MAX_ALLOWLIST_ALIASES = 50
@@ -42,6 +42,7 @@ class _AllowlistStatus(StrEnum):
     TOO_LARGE = "too_large"
     INVALID = "invalid"
     TIMED_OUT = "timed_out"
+    INTERRUPTED = "interrupted"
 
 
 def _invalid_allowlist() -> UsageFailure:
@@ -80,6 +81,13 @@ def _validate_yaml_structure(document: Node | None) -> bool:
     return True
 
 
+def _close_raw_handle(handle: SafeRegularFile) -> None:
+    try:
+        handle.close()
+    except BaseException:
+        return
+
+
 def _load_raw_allowlist(
     root: Path, deadline: float
 ) -> tuple[_AllowlistStatus, SecretAllowlist | None]:
@@ -88,14 +96,14 @@ def _load_raw_allowlist(
     text = ""
     nodes: Node | None = None
     document: object | None = None
-    handle = None
+    handle: SafeRegularFile | None = None
     try:
         if time.monotonic() >= deadline:
             return (_AllowlistStatus.TIMED_OUT, None)
         try:
             handle = open_regular_file(root, _ALLOWLIST_NAME)
-        except SafeOpenFailure:
-            if not (root / _ALLOWLIST_NAME).exists():
+        except SafeOpenFailure as failure:
+            if failure.reason == "missing":
                 return (_AllowlistStatus.MISSING, None)
             return (_AllowlistStatus.INVALID, None)
         if handle.size > MAX_ALLOWLIST_BYTES:
@@ -117,15 +125,15 @@ def _load_raw_allowlist(
         if time.monotonic() >= deadline:
             return (_AllowlistStatus.TIMED_OUT, None)
         return (_AllowlistStatus.VALID, model)
-    except Exception:
+    except BaseException:
         return (_AllowlistStatus.INVALID, None)
     finally:
-        if handle is not None:
-            handle.close()
         data = b""
         text = ""
         nodes = None
         document = None
+        if handle is not None:
+            _close_raw_handle(handle)
 
 
 def load_secret_allowlist(

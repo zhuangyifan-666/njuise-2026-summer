@@ -38,6 +38,7 @@ class _ScanStatus(StrEnum):
     READ_FAILED = "read_failed"
     CLASSIFIER_FAILED = "classifier_failed"
     DISCARDED = "discarded"
+    INTERRUPTED = "interrupted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,12 +115,18 @@ class SecretCollector:
             ):
                 continue
             limited = self._add_sensitive_filename(file, rules, allowlist, matches, seen) or limited
-            if limited or file.size > context.max_read_bytes:
+            if limited:
+                break
+            if file.size > context.max_read_bytes:
                 continue
             try:
                 opened = open_regular_file(root, file.relative)
-            except SafeOpenFailure:
-                continue
+            except SafeOpenFailure as failure:
+                if failure.reason in {"missing", "unsafe"}:
+                    continue
+                raise RuntimeFailure(
+                    "Unable to open repository file.", "Check repository readability or reduce scope."
+                ) from None
             if opened.size > context.max_read_bytes:
                 opened.close()
                 continue
@@ -130,7 +137,10 @@ class SecretCollector:
                 rules,
                 allowlist,
                 deadline,
+                _MAX_REPORTED_MATCHES - len(matches),
             )
+            if status is _ScanStatus.INTERRUPTED:
+                raise KeyboardInterrupt
             if status is _ScanStatus.TIMED_OUT:
                 raise RuntimeFailure("Secret scan timed out.", "Reduce scope or ignored paths.")
             if status is _ScanStatus.READ_FAILED:
@@ -203,11 +213,11 @@ class SecretCollector:
         rules: tuple[SecretScanRule, ...],
         allowlist: frozenset[tuple[str, str, str]],
         deadline: float,
+        capacity: int,
     ) -> tuple[_ScanStatus, tuple[_SafeMatch, ...]]:
         """Read/classify raw bytes without allowing their frame into an outward traceback."""
         fragment = b""
-        tail = b""
-        window = b""
+        line = bytearray()
         local_matches: list[_SafeMatch] = []
         line_number = 1
         remaining = max_read_bytes
@@ -223,18 +233,25 @@ class SecretCollector:
                         return (_ScanStatus.DISCARDED, ())
                     first = False
                     for part, newline in self._physical_parts(fragment):
-                        window = tail + part
-                        cutoff = len(window) if newline else max(0, len(window) - _PATTERN_TAIL_BYTES)
-                        local_matches.extend(
-                            self._classify(window, cutoff, relative, line_number, rules, allowlist)
-                        )
-                        tail = b"" if newline else window[-_PATTERN_TAIL_BYTES:]
+                        line.extend(part)
                         if newline:
+                            local_matches.extend(
+                                self._classify(
+                                    bytes(line), len(line), relative, line_number, rules, allowlist,
+                                    capacity - len(local_matches),
+                                )
+                            )
+                            line.clear()
                             line_number += 1
+                            if len(local_matches) >= capacity:
+                                return (_ScanStatus.LIMITED, tuple(local_matches))
                     _raise_if_timed_out(deadline)
-                if tail:
+                if line:
                     local_matches.extend(
-                        self._classify(tail, len(tail), relative, line_number, rules, allowlist)
+                        self._classify(
+                            bytes(line), len(line), relative, line_number, rules, allowlist,
+                            capacity - len(local_matches),
+                        )
                     )
                 if os.fstat(opened.stream.fileno()).st_size > max_read_bytes:
                     return (_ScanStatus.DISCARDED, ())
@@ -243,12 +260,13 @@ class SecretCollector:
             return (_ScanStatus.TIMED_OUT, ())
         except OSError:
             return (_ScanStatus.READ_FAILED, ())
-        except Exception:
+        except (KeyboardInterrupt, SystemExit, GeneratorExit):
+            return (_ScanStatus.INTERRUPTED, ())
+        except BaseException:
             return (_ScanStatus.CLASSIFIER_FAILED, ())
         finally:
             fragment = b""
-            tail = b""
-            window = b""
+            line.clear()
 
     @staticmethod
     def _physical_parts(fragment: bytes) -> tuple[tuple[bytes, bool], ...]:
@@ -270,12 +288,15 @@ class SecretCollector:
         line_number: int,
         rules: tuple[SecretScanRule, ...],
         allowlist: frozenset[tuple[str, str, str]],
+        capacity: int,
     ) -> tuple[_SafeMatch, ...]:
         found_matches: list[_SafeMatch] = []
         token_rules = _applicable_rules(rules, relative, "token")
         if token_rules:
             for pattern in TOKEN_PATTERNS:
                 for found in pattern.finditer(window):
+                    if len(found_matches) >= capacity:
+                        return tuple(found_matches)
                     if found.end() <= cutoff:
                         found_matches.append(
                             SecretCollector._safe_match(
@@ -290,6 +311,8 @@ class SecretCollector:
         private_rules = _applicable_rules(rules, relative, "private_key")
         if private_rules:
             for found in PRIVATE_KEY.finditer(window):
+                if len(found_matches) >= capacity:
+                    return tuple(found_matches)
                 if found.end() <= cutoff:
                     found_matches.append(
                         SecretCollector._safe_match(
@@ -303,6 +326,8 @@ class SecretCollector:
                     )
         entropy_rules = _applicable_rules(rules, relative, "high_entropy")
         for found in ASSIGNMENT.finditer(window):
+            if len(found_matches) >= capacity:
+                return tuple(found_matches)
             if found.end(1) > cutoff:
                 continue
             raw = found.group(1)

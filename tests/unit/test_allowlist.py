@@ -1,3 +1,4 @@
+import io
 import traceback
 from pathlib import Path
 
@@ -5,6 +6,7 @@ import pytest
 
 from repoproof.allowlist import load_secret_allowlist
 from repoproof.errors import UsageFailure
+from repoproof.security import SafeRegularFile
 
 
 def _traceback_contains(exception: BaseException, marker: str) -> bool:
@@ -97,6 +99,24 @@ def test_allowlist_deep_structure_is_safely_rejected_without_traceback_leak(tmp_
         f"schema: 1\nentries: {nested}\n", encoding="utf-8"
     )
 
+    with pytest.raises(UsageFailure) as error:
+        load_secret_allowlist(tmp_path)
+
+    assert not _traceback_contains(error.value, marker)
+
+
+def test_allowlist_close_failure_cannot_leak_raw_parser_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a close error replacing the sanitized parser result with raw locals."""
+    marker = "close-traceback-canary"
+    class BrokenHandle(SafeRegularFile):
+        def close(self) -> None:
+            raise OSError(marker)
+
+    stream = io.BytesIO(f"schema: 1\nentries: [{{value: {marker}}}]\n".encode())
+    handle = BrokenHandle(stream, len(stream.getvalue()))
+    monkeypatch.setattr("repoproof.allowlist.open_regular_file", lambda _root, _name: handle)
     with pytest.raises(UsageFailure) as error:
         load_secret_allowlist(tmp_path)
 

@@ -11,6 +11,10 @@ from repoproof.errors import UsageFailure
 class SafeOpenFailure(Exception):
     """A path/handle safety failure with no repository content attached."""
 
+    def __init__(self, reason: str = "unsafe") -> None:
+        super().__init__(reason)
+        self.reason = reason
+
 
 @dataclass(slots=True)
 class SafeRegularFile:
@@ -24,7 +28,7 @@ class SafeRegularFile:
 def _checked_relative_parts(relative: str) -> tuple[str, ...]:
     candidate = Path(relative)
     if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
-        raise SafeOpenFailure
+        raise SafeOpenFailure("unsafe")
     return candidate.parts
 
 
@@ -33,24 +37,31 @@ def _open_regular_posix(root: Path, parts: tuple[str, ...]) -> SafeRegularFile:
     if no_follow == 0:
         raise SafeOpenFailure
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | no_follow
-    root_fd = os.open(root, directory_flags)
+    try:
+        root_fd = os.open(root, directory_flags)
+    except FileNotFoundError as exc:
+        raise SafeOpenFailure("missing") from exc
+    except OSError as exc:
+        raise SafeOpenFailure("operational") from exc
     opened_fds = [root_fd]
     try:
         for part in parts[:-1]:
             fd = os.open(part, directory_flags, dir_fd=opened_fds[-1])
             if not stat.S_ISDIR(os.fstat(fd).st_mode):
                 os.close(fd)
-                raise SafeOpenFailure
+                raise SafeOpenFailure("unsafe")
             opened_fds.append(fd)
         final_fd = os.open(parts[-1], os.O_RDONLY | no_follow, dir_fd=opened_fds[-1])
         file_stat = os.fstat(final_fd)
         if not stat.S_ISREG(file_stat.st_mode):
             os.close(final_fd)
-            raise SafeOpenFailure
+            raise SafeOpenFailure("unsafe")
         stream = os.fdopen(final_fd, "rb", closefd=True)
         return SafeRegularFile(stream, file_stat.st_size)
+    except FileNotFoundError as exc:
+        raise SafeOpenFailure("missing") from exc
     except OSError as exc:
-        raise SafeOpenFailure from exc
+        raise SafeOpenFailure("operational") from exc
     finally:
         for fd in reversed(opened_fds):
             os.close(fd)
@@ -73,10 +84,12 @@ def _open_regular_windows(root: Path, relative: str) -> SafeRegularFile:
         current = current / part
         try:
             attributes = current.lstat().st_file_attributes
+        except FileNotFoundError as exc:
+            raise SafeOpenFailure("missing") from exc
         except OSError as exc:
-            raise SafeOpenFailure from exc
+            raise SafeOpenFailure("operational") from exc
         if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-            raise SafeOpenFailure
+            raise SafeOpenFailure("unsafe")
     create_file = ctypes.windll.kernel32.CreateFileW
     create_file.argtypes = [
         wintypes.LPCWSTR,
@@ -99,27 +112,29 @@ def _open_regular_windows(root: Path, relative: str) -> SafeRegularFile:
     )
     invalid_handle = wintypes.HANDLE(-1).value
     if handle == invalid_handle:
-        raise SafeOpenFailure
+        raise SafeOpenFailure("operational")
     descriptor: int | None = None
     try:
         descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
         file_stat = os.fstat(descriptor)
         if not stat.S_ISREG(file_stat.st_mode):
-            raise SafeOpenFailure
+            raise SafeOpenFailure("unsafe")
         buffer = ctypes.create_unicode_buffer(32768)
         length = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle, buffer, len(buffer), 0)
         if not length or length >= len(buffer):
-            raise SafeOpenFailure
+            raise SafeOpenFailure("operational")
         final_name = buffer.value.removeprefix("\\\\?\\")
         try:
             Path(final_name).resolve(strict=True).relative_to(root.resolve(strict=True))
         except (OSError, ValueError) as exc:
-            raise SafeOpenFailure from exc
+            raise SafeOpenFailure("unsafe") from exc
         stream = os.fdopen(descriptor, "rb", closefd=True)
         descriptor = None
         return SafeRegularFile(stream, file_stat.st_size)
+    except FileNotFoundError as exc:
+        raise SafeOpenFailure("missing") from exc
     except OSError as exc:
-        raise SafeOpenFailure from exc
+        raise SafeOpenFailure("operational") from exc
     finally:
         if descriptor is not None:
             os.close(descriptor)

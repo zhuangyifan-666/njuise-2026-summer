@@ -123,3 +123,32 @@ reparse opening and final-handle containment; if those handle queries fail the
 operation fails closed before bytes are read. Parent-component changes are
 preflight-reparse-checked and final-handle-contained; no content is read from a
 replaced target before that containment validation.
+
+## Formal review round 2/5
+
+- Allowlist cleanup now clears raw bytes/text/parser references before an
+  exception-contained close operation, so a close failure cannot replace a safe
+  result with a raw traceback.
+- Raw scanning catches `BaseException` categories, converts interruption to a
+  safe status, clears raw buffers, and re-raises `KeyboardInterrupt` only from
+  the non-raw collector frame.
+- Safe-open failures now carry sanitized `missing`, `unsafe`, or `operational`
+  classes. The collector skips only missing/unsafe candidates and converts
+  operational failures to a sanitized runtime failure; allowlist failures remain
+  sanitized usage failures without following an `exists()` fallback.
+- Physical-line collection replaces fixed overlap classification. Lines remain
+  bounded by the configured per-file read budget and are classified only at
+  newline/EOF. The raw helper receives remaining match capacity and stops before
+  accumulating beyond it.
+
+### Round 2 TDD evidence
+
+- Focused regressions for raw close failure, keyboard interruption, and raw
+  helper match capacity reported `3 passed`.
+- The pre-change suite initially exposed missing-file classification on Windows
+  after reason-class hardening; correcting non-following missing classification
+  returned the existing secret collector regression to GREEN.
+- Final round-2 verification: Task3+Task6 focused `37 passed, 5 skipped`;
+  Ruff clean; mypy `Success: no issues found in 19 source files`; full suite
+  `92 passed, 5 skipped`; `git diff --check` clean apart from expected CRLF
+  notices.

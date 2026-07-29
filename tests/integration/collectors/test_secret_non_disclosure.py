@@ -197,6 +197,30 @@ def test_timeout_traceback_never_retains_candidate_text(tmp_path: Path) -> None:
     assert not _traceback_contains(error.value, marker)
 
 
+def test_keyboard_interrupt_is_reraised_without_raw_scanner_traceback(tmp_path: Path) -> None:
+    """Catches a BaseException escaping the raw classifier frame."""
+    marker = "interrupt-traceback-canary"
+    (tmp_path / "config.txt").write_text(CANARY + marker, encoding="utf-8")
+
+    with patch.object(SecretCollector, "_classify", side_effect=KeyboardInterrupt(marker)):
+        with pytest.raises(KeyboardInterrupt) as error:
+            _collect(tmp_path)
+
+    assert not _traceback_contains(error.value, marker)
+
+
+def test_match_cap_stops_inside_raw_helper(tmp_path: Path) -> None:
+    """Catches raw classification accumulating matches beyond the remaining capacity."""
+    values = [f"ghp_{index:020d}" for index in range(10)]
+    (tmp_path / "config.txt").write_text(" ".join(values), encoding="utf-8")
+
+    with patch("repoproof.collectors.secrets._MAX_REPORTED_MATCHES", 5):
+        evidence = _collect(tmp_path)
+
+    assert evidence.state.value == "limited"
+    assert len(evidence.facts["matches"]) == 5
+
+
 def test_stale_inventory_with_complete_token_and_trailing_growth_is_discarded(
     tmp_path: Path,
 ) -> None:
