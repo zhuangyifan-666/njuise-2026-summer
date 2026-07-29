@@ -30,4 +30,4 @@ The fixture contains no credentials or private data.
 
 ## 已知限制
 
-This fixture is not itself initialized as a Git repository.
+The source fixture excludes Git metadata; the acceptance test initializes an isolated copy.
