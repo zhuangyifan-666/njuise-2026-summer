@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-Superpowers brainstorming 的四节设计已逐节获得学生批准。`SPEC.md` 和 Superpowers 设计文档已完成自审，当前等待学生对书面规约做最终审阅。下方“前置上下文”保留设计开始前的真实历史。
+Superpowers brainstorming 的四节设计及最终书面规约均已获得学生批准。`SPEC.md` 和 Superpowers 设计文档已完成自审，当前进入 `writing-plans` 实现计划阶段。下方“前置上下文”保留设计开始前的真实历史。
 
 ## 前置上下文
 
@@ -144,3 +144,22 @@ RepoProof 是一个发布前仓库审计与证据报告 CLI。目标用户是需
 4. **歧义**：固定四种规则状态、四档退出码、离线/远程降级、报告输出与 Token 生命周期。
 
 机械检查结果：8 个唯一用户故事、20 个唯一验收标准、无 Git diff whitespace error。
+
+### 最终书面规约批准
+
+- 学生审阅已提交的 `SPEC.md` 后明确回复“批准”。
+- 规格提交：`15de2c7`（`docs: define RepoProof specification`）。
+- 允许进入 `writing-plans`，但在计划完成并选择执行方式前不编写产品代码。
+- 文件映射时发现 PLAN commit 证据缺少独立规则类型；为保持六种规则边界，将其明确为 `markdown_sections` 的可选 checklist commit 检查，而不新增规则类型。
+- Secret allowlist 固定为严格的 `.repoproofallowlist.yml`，只接受规则 ID、相对路径和 8 位短指纹，禁止保存 Secret 原文。
+- Profile 增加严格的可选 `manual_checks` 列表，让无法确定性判断的质量要求进入三种报告，但不伪装成自动规则或影响退出码。
+
+### 实现计划
+
+- 详细计划：`docs/superpowers/plans/2026-07-29-repoproof-implementation.md`
+- 课程执行台账：`PLAN.md`
+- 计划拆为 15 个依赖有序的 TDD Task，每个 Task 包含明确文件、接口、RED 命令、最小实现、GREEN 命令和 focused commit。
+- 覆盖检查：AC-01 至 AC-20 全部映射到 Task 和客观验证。
+- 结构检查：Task 1–15 各出现一次，240 个 Markdown fence 配对。
+- 完整性检查：禁止的未来工作/含糊占位语言为 0，跨 Task 锁定接口均存在，`git diff --check` 无错误。
+- 下一门禁：学生选择 Subagent-Driven 或 Inline Execution 后，才进入实现。

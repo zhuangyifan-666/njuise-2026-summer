@@ -7,7 +7,7 @@
 - **规约版本**：1.0
 - **Profile schema**：1
 - **Report schema**：1
-- **设计状态**：四节设计均已由学生批准；本文等待最终书面审阅
+- **设计状态**：四节设计及最终书面规约均已由学生批准
 - **交付形态**：CLI + GitHub Release，不开发 WebUI
 
 RepoProof 是一个离线优先、默认只读的发布前仓库审计 CLI。它把课程要求或团队发布约定表达为声明式 profile，采集本地仓库及可选 GitHub 远程证据，生成确定、可复核的合规报告。
@@ -205,6 +205,8 @@ repoproof version
 schema: 1
 name: ai4se-b
 description: AI4SE B project release-readiness checks
+manual_checks:
+  - Review reflection quality and module responsibility clarity.
 rules:
   - id: docs.spec
     type: path_exists
@@ -228,8 +230,8 @@ rules:
    - 输入：相对路径或 glob 列表、最小匹配数。
    - 判断：匹配数是否达到要求。
 2. `markdown_sections`
-   - 输入：文件路径、必备标题及可选别名。
-   - 判断：解析后的标题层级中是否存在规范化标题。
+   - 输入：文件路径、必备标题及可选别名；可选启用“已完成 checklist 项必须包含 7–40 位 Git commit hash”检查。
+   - 判断：解析后的标题层级中是否存在规范化标题；启用 checklist 检查时，逐项验证已勾选条目的 commit 证据。
 3. `ci_job_exists`
    - 输入：CI 类型、文件路径、job 名称。
    - 判断：YAML 顶层 job 是否存在；GitHub Actions 忽略保留键。
@@ -240,7 +242,7 @@ rules:
    - 输入：允许的打包方式、必备配置路径、是否要求 Release workflow，以及是否接受已发布 Release。
    - 判断：至少一种本地打包组合完整；Release 条件可由本地 workflow 或可选 GitHub Release Evidence 满足。
 6. `secret_scan`
-   - 输入：启用的模式类别、熵阈值、排除路径。
+   - 输入：启用的模式类别、熵阈值、排除路径；可选 `.repoproofallowlist.yml` 仅允许规则 ID、相对路径和 8 位短指纹。
    - 判断：SecretCollector 是否产生未被 allowlist 抑制的发现。
 
 ### 结果语义
@@ -468,6 +470,7 @@ sequenceDiagram
 | schema | int | 必须为 1 |
 | name | str | 3–64 字符 |
 | description | str | 1–500 字符 |
+| manual_checks | list[str] | 可选人工复核项；不影响自动状态与退出码 |
 | rules | list[Rule] | 至少 1 条，ID 唯一 |
 
 ### Rule

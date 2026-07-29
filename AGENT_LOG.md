@@ -123,3 +123,29 @@
   - 将 `SPEC_PROCESS.md` 的历史“前置准备”状态更新为已完成设计、等待书面审阅。
 - **证据**：8 个唯一用户故事；20 个唯一验收标准；占位符扫描为 0；`git diff --check` 无错误。
 - **门禁**：学生尚需审阅已落盘的书面 `SPEC.md`。
+
+### P1 · 最终书面规约批准与计划启动
+
+- **学生反馈**：审阅已提交规格后明确回复“批准”。
+- **规格提交**：`15de2c7`（`docs: define RepoProof specification`）。
+- **触发技能**：`writing-plans`。
+- **边界澄清**：PLAN 已完成项 commit 证据由 `markdown_sections` 的可选 checklist 检查实现，保持六种预定义规则不变。
+- **安全澄清**：Secret allowlist 使用严格的 `.repoproofallowlist.yml`，只能记录规则 ID、相对路径和 8 位短指纹。
+- **覆盖澄清**：Profile 使用可选 `manual_checks` 承载反思质量、模块职责等人工复核内容；三种报告展示但不计入自动状态。
+- **当前门禁**：先完成实现计划、自审和提交，再由学生选择 Subagent-Driven 或 Inline Execution。
+
+### P1 · 实现计划完成与自审
+
+- **技能**：`writing-plans`。
+- **产物**：`docs/superpowers/plans/2026-07-29-repoproof-implementation.md`、`PLAN.md`。
+- **任务拆分**：15 个有序 TDD Task，覆盖领域模型、Profile、Collectors、Rule Engine、Reporters、CLI、凭据、GitHub、验收、性能、CI、打包、课程文档和 Release。
+- **自审修正**：
+  - PLAN commit 证据归入 `markdown_sections` 可选检查，不扩张六种规则。
+  - Secret allowlist 固定为无原文的严格结构，并支持多条 Secret 规则各自过滤。
+  - Profile 路径统一使用 `SafeRepoPath`。
+  - GitHub Collector 改为本地 Git 证据之后才创建的 factory。
+  - Evidence provenance 使用应用层注入的统一 snapshot 时间。
+  - 人工质量要求使用 `manual_checks` 进入三种报告而不影响退出码。
+- **机械证据**：Task 1–15 各一次；AC-01–20 全覆盖；240 个 fence 配对；禁止未来工作语言 0；`git diff --check` 无错误。
+- **人工干预**：本阶段无需新增人工输入。
+- **下一门禁**：提交计划后由学生选择执行方式。
