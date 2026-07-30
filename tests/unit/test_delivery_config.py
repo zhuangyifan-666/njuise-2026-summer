@@ -1,8 +1,12 @@
+import os
+import shutil
+import subprocess
 from collections.abc import Mapping, Sequence
 from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -126,3 +130,57 @@ def test_release_is_tag_only_and_validates_artifacts_before_publishing() -> None
             "source",
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("reported_version", "audit_exit"),
+    (("9.9.9", "0"), ("1.0.0", "1")),
+)
+def test_release_smoke_gate_rejects_wrong_version_or_failing_fixture(
+    tmp_path: Path, reported_version: str, audit_exit: str
+) -> None:
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if pwsh is None:
+        pytest.skip("PowerShell is required to execute the release smoke gate")
+    jobs = cast(Mapping[str, Any], _workflow("release.yml")["jobs"])
+    build = cast(Mapping[str, Any], jobs["build"])
+    smoke = next(
+        step
+        for step in _steps(build)
+        if step.get("name") == "Name, smoke-test, and checksum the release asset"
+    )
+    source = cast(str, smoke["run"])
+    executable = tmp_path / "fake.ps1"
+    executable.write_text(
+        "param([string]$Command)\n"
+        'if ($Command -eq "version") { Write-Output "repoproof $env:FAKE_VERSION"; exit 0 }\n'
+        'if ($Command -eq "audit") { exit ([int]$env:FAKE_AUDIT_EXIT) }\n'
+        "exit 4\n",
+        encoding="utf-8",
+    )
+    smoke_lines: list[str] = []
+    for line in source.splitlines():
+        if "./scripts/write_checksum.ps1" in line:
+            break
+        if "Move-Item" in line or "GITHUB_ENV" in line:
+            continue
+        smoke_lines.append(line)
+    smoke_script = "\n".join(smoke_lines)
+    smoke_script = smoke_script.replace("${{ github.ref_name }}", "v1.0.0")
+    smoke_script = smoke_script.replace('& "dist/$name"', '& "$PSScriptRoot/fake.ps1"')
+    script = tmp_path / "smoke.ps1"
+    script.write_text(smoke_script, encoding="utf-8")
+    environment = os.environ.copy()
+    environment["FAKE_VERSION"] = reported_version
+    environment["FAKE_AUDIT_EXIT"] = audit_exit
+
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(script)],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
