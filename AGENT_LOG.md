@@ -199,13 +199,13 @@
   因此 `PLAN.md` 的 Task 14 已标为 completed。后续本条目只作台账收尾，不替换该
   feature commit。
 - **复核状态**：本地规格符合性复核（AC-19/AC-20 与内置 profile）和代码质量复核
-  （Ruff、mypy、`git diff --check`）均已完成；尚无独立 PR 评审、托管 CI、tag 或
-  Release，仍由 Task 15 在真实外部动作完成后记录。
+  （Ruff、mypy、`git diff --check`）均已完成。本条 Task 14 记录创建时还没有独立
+  PR 评审、托管 CI、tag 或 Release；这些随后在 Task 15 完成并记录于下文。
 
 ### P2 · Task 15：1.0.0 本地发布候选
 
-- **范围**：本阶段只准备本地 release candidate，不 push、不创建 PR、不创建 tag
-  或 Release；Task 15 在外部发布及资产验证完成前保持 `in progress`。
+- **范围**：本阶段记录当时的本地 release candidate，不把尚未发生的 push、PR、
+  tag 或 Release 预填为事实；最终外部发布及资产验证见下一节。
 - **RED 证据**：先新增
   `tests/unit/test_delivery_config.py::test_installed_cli_reports_release_version`，
   运行聚焦测试得到 `1 failed`；安装后元数据实际为 `0.1.0`，与预期 `1.0.0`
@@ -220,5 +220,40 @@
 - **验证策略**：按学生“减少不必要测试、能通过作业验收即可”的要求，本阶段仅运行
   版本聚焦测试、与文档变更直接相关的最小测试、Ruff、mypy 和
   `git diff --check`；完整 pytest、性能和 PyInstaller 由发布前统一验收门禁执行。
-- **外部状态**：PR、托管 CI、`v1.0.0` tag、GitHub Release、可下载 Windows 资产及
-  checksum 验证仍为 pending；此处不预填 URL 或结果。
+- **阶段性外部状态**：创建 release candidate 提交时，PR、托管 CI、`v1.0.0`
+  tag、GitHub Release、可下载 Windows 资产及 checksum 验证尚未发生；随后均已
+  完成，真实结果记录在下一节。
+
+### P2 · Task 15：PR、v1.0.0 与公开 Release 验证
+
+- **Release candidate**：Task 15 的 feature commit 为 `8eea3b5`
+  （`release: prepare RepoProof 1.0.0`）。
+- **实现 PR**：
+  [PR #1](https://github.com/zhuangyifan-666/njuise-2026-summer/pull/1)
+  已合并；其
+  [GitHub Actions CI](https://github.com/zhuangyifan-666/njuise-2026-summer/actions/runs/30513605180)
+  状态为 success，Python 3.12 与 Python 3.13 两个任务均通过。
+- **合并与 tag**：实现 PR 的合并提交为
+  `3fbef7fe9d2afe374601a710ced1547170c58177`；`v1.0.0` 精确指向该提交。
+- **Release workflow**：
+  [run 30513757894](https://github.com/zhuangyifan-666/njuise-2026-summer/actions/runs/30513757894)
+  状态为 success。
+- **公开 Release**：
+  [RepoProof v1.0.0](https://github.com/zhuangyifan-666/njuise-2026-summer/releases/tag/v1.0.0)
+  已公开，既不是 draft 也不是 prerelease；资产为
+  `repoproof-1.0.0-windows-x86_64.exe` 和
+  `repoproof-1.0.0-windows-x86_64.exe.sha256`。
+- **下载与 SHA-256 验证**：下载资产后得到的 SHA-256 为
+  `5a25ea58aa10cef191a8546eb15a967395ba3c40e42af9773d29cb340b067e54`，
+  与 `.sha256` 文件一致。
+- **下载包行为**：执行下载的二进制输出 `repoproof 1.0.0`；对
+  `examples/compliant-repo` 执行离线审计得到
+  `10 PASS / 0 SKIP / 0 FAIL`。
+- **证据时序**：本节 URL 与下载验证结果在 `v1.0.0` tag 创建后通过独立证据分支
+  回填；它们不在 `v1.0.0` tagged source archive 内，也没有重写 tag。
+- **证据回填验证**：课程文档聚焦测试为 `1 passed`；在证据分支运行
+  `ai4se-b` 离线自审得到 `10 PASS / 0 WARN / 0 SKIP / 0 FAIL`、退出码 0；
+  `git diff --check` 退出 0。
+- **Task 15 状态**：实现 PR、托管 CI、合并、tag、Release workflow、公开 Release
+  与下载验证均完成；`PLAN.md` 已将 Task 15 标为 completed，并同时记录 feature
+  commit `8eea3b5` 与 merge/tag commit `3fbef7f`。
