@@ -50,6 +50,12 @@ def _step_names(steps: Sequence[Mapping[str, Any]]) -> list[str]:
     return [cast(str, step["name"]) for step in steps]
 
 
+def _full_history_checkout_index(steps: Sequence[Mapping[str, Any]]) -> int:
+    index = _step_index(steps, uses="actions/checkout@v4")
+    assert steps[index].get("with") == {"fetch-depth": 0}
+    return index
+
+
 def test_gitlab_defines_the_required_unit_test_job() -> None:
     config = _load_yaml(ROOT / ".gitlab-ci.yml")
 
@@ -79,11 +85,8 @@ def test_ci_runs_the_supported_python_versions_with_read_only_permissions() -> N
         "Type-check",
         "Test",
     ]
-    checkout_index = _step_index(steps, uses="actions/checkout@v4")
-    assert steps[checkout_index]["with"] == {"fetch-depth": 0}
-    assert checkout_index < _step_index(
-        steps, uses="actions/setup-python@v5"
-    )
+    checkout_index = _full_history_checkout_index(steps)
+    assert checkout_index < _step_index(steps, uses="actions/setup-python@v5")
 
 
 def test_release_is_tag_only_and_validates_artifacts_before_publishing() -> None:
@@ -98,6 +101,7 @@ def test_release_is_tag_only_and_validates_artifacts_before_publishing() -> None
     assert config["on"] == {"push": {"tags": ["v*"]}}
     assert config["permissions"] == {"contents": "write"}
     assert build["runs-on"] == "windows-latest"
+    _full_history_checkout_index(steps)
     assert _step_names(steps) == [
         "Check out repository",
         "Set up Python",
