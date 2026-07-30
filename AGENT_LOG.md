@@ -195,5 +195,9 @@
   启动（命令未找到）。已读取 `Makefile`，并按其 `verify` 目标的三个精确子命令运行：
   Ruff、mypy 和 `python -m pytest`；默认测试结果为 `196 passed, 5 skipped, 1 deselected`
   （8.27 秒）。这不是托管 CI，也不宣称 `make verify` 在本机已执行。
-- **Task 14 提交**：待本次文档提交实际创建后记录；按台账规则，Task 14 在提交前
-  保持 `in progress`，由后续 Task 15 决定最终台账状态。
+- **Task 14 提交**：`817c91b`（`docs: complete RepoProof delivery evidence`）已创建，
+  因此 `PLAN.md` 的 Task 14 已标为 completed。后续本条目只作台账收尾，不替换该
+  feature commit。
+- **复核状态**：本地规格符合性复核（AC-19/AC-20 与内置 profile）和代码质量复核
+  （Ruff、mypy、`git diff --check`）均已完成；尚无独立 PR 评审、托管 CI、tag 或
+  Release，仍由 Task 15 在真实外部动作完成后记录。

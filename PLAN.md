@@ -18,7 +18,7 @@ Canonical implementation steps:
 | 11 | Optional sanitized GitHub evidence | completed | `2480808` — feat: add optional sanitized GitHub evidence |
 | 12 | Acceptance and security behavior evidence | completed | `528c87d` — test: prove RepoProof acceptance and security behavior |
 | 13 | CI, Windows packaging, and Release automation | completed | `e709c69` — ci: verify package and publish Windows releases |
-| 14 | Course documentation, reflection, and process evidence | in progress | pending Task 14 commit |
+| 14 | Course documentation, reflection, and process evidence | completed | `817c91b` — docs: complete RepoProof delivery evidence |
 | 15 | Final review, PR, tag, and public Release verification | pending | not applicable until completion |
 
 The table records feature commits only. Subsequent hardening and documentation commits remain
