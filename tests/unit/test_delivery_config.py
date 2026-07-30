@@ -100,3 +100,17 @@ def test_release_is_tag_only_and_validates_artifacts_before_publishing() -> None
         "dist/${{ env.ASSET_NAME }}\n"
         "dist/${{ env.ASSET_NAME }}.sha256\n"
     )
+    release_body = ROOT / "RELEASE.md"
+    assert release_step["with"]["body_path"] == release_body.name
+    document = release_body.read_text(encoding="utf-8")
+    assert all(
+        section in document
+        for section in (
+            "Windows 10/11 x64",
+            "Get-FileHash",
+            "SmartScreen",
+            "offline",
+            "keyring",
+            "source",
+        )
+    )

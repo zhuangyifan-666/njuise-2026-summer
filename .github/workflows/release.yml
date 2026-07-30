@@ -59,6 +59,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          body_path: RELEASE.md
           files: |
             dist/${{ env.ASSET_NAME }}
             dist/${{ env.ASSET_NAME }}.sha256
