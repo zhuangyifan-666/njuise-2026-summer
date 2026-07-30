@@ -8,9 +8,9 @@ from yaml.tokens import AliasToken
 
 from repoproof.collectors.base import AuditContext, collector_provenance
 from repoproof.domain import Evidence, EvidenceState
-from repoproof.errors import RuntimeFailure
+from repoproof.errors import RuntimeFailure, UsageFailure
 from repoproof.profile.models import Profile
-from repoproof.security import resolve_under_root
+from repoproof.security import SafeOpenFailure, open_regular_file, resolve_under_root
 
 PACKAGING = {
     "python": ("pyproject.toml", "repoproof.spec"),
@@ -32,8 +32,11 @@ def _raise_if_timed_out(deadline: float) -> None:
 def _paths_exist(context: AuditContext, paths: tuple[str, ...], deadline: float) -> bool:
     for path in paths:
         _raise_if_timed_out(deadline)
-        if not resolve_under_root(context.root, path).is_file():
+        try:
+            opened = open_regular_file(context.root, path)
+        except SafeOpenFailure:
             return False
+        opened.close()
     return True
 
 
@@ -59,11 +62,17 @@ def _has_tag_pattern(tags: Node | None) -> bool:
     return False
 
 
-def _is_release_workflow(path: Path, read_limit: int, deadline: float) -> bool:
+def _is_release_workflow(root: Path, relative: str, read_limit: int, deadline: float) -> bool:
     _raise_if_timed_out(deadline)
-    if "release" not in path.name.casefold() or path.stat().st_size > read_limit:
+    if "release" not in Path(relative).name.casefold():
         return False
-    content = path.read_text(encoding="utf-8")
+    opened = open_regular_file(root, relative)
+    try:
+        if opened.size > read_limit:
+            return False
+        content = opened.stream.read().decode("utf-8")
+    finally:
+        opened.close()
     aliases = sum(isinstance(token, AliasToken) for token in yaml.scan(content))
     if aliases > MAX_WORKFLOW_ALIASES:
         raise yaml.YAMLError("alias limit exceeded")
@@ -110,8 +119,8 @@ class DistributionCollector:
                                 "Reduce scope or ignored paths.",
                             )
                         relative = candidate.relative_to(root).as_posix()
-                        path = resolve_under_root(context.root, relative)
-                        if path.is_file() and _is_release_workflow(path, read_limit, deadline):
+                        resolve_under_root(context.root, relative)
+                        if _is_release_workflow(root, relative, read_limit, deadline):
                             release_workflow = True
                             break
                     if release_workflow:
@@ -122,7 +131,7 @@ class DistributionCollector:
                 "packaging": packaging,
                 "release_workflow": release_workflow,
             }
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError, SafeOpenFailure, UsageFailure):
             state = EvidenceState.LIMITED
             facts = {"reason": "unreadable_repository"}
         except yaml.YAMLError:

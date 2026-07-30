@@ -7,7 +7,7 @@ from repoproof.collectors.base import AuditContext, collector_provenance
 from repoproof.domain import Evidence, EvidenceState
 from repoproof.errors import RuntimeFailure
 from repoproof.profile.models import CIJobExistsRule, Profile
-from repoproof.security import resolve_under_root
+from repoproof.security import SafeOpenFailure, open_regular_file
 
 MAX_CI_BYTES = 2 * 1024 * 1024
 MAX_YAML_ALIASES = 50
@@ -83,30 +83,37 @@ class CICollector:
         evidence: list[Evidence] = []
         for ci_type, subject in specs:
             _raise_if_timed_out(deadline)
-            path = resolve_under_root(context.root, subject)
             state = EvidenceState.UNAVAILABLE
             facts: dict[str, object] = {}
+            opened = None
             try:
-                if path.is_file():
-                    if path.stat().st_size > read_limit:
-                        state = EvidenceState.LIMITED
-                        facts = {"reason": "file_too_large"}
-                    else:
-                        text = path.read_text(encoding="utf-8")
-                        aliases = sum(isinstance(token, AliasToken) for token in yaml.scan(text))
-                        if aliases > MAX_YAML_ALIASES:
-                            raise yaml.YAMLError("alias limit exceeded")
-                        _raise_if_timed_out(deadline)
-                        mapping = _document_mapping(ci_type, text)
-                        _raise_if_timed_out(deadline)
-                        facts = {"jobs": _jobs(ci_type, mapping)}
-                        state = EvidenceState.AVAILABLE
+                opened = open_regular_file(context.root, subject)
+                if opened.size > read_limit:
+                    state = EvidenceState.LIMITED
+                    facts = {"reason": "file_too_large"}
+                else:
+                    text = opened.stream.read().decode("utf-8")
+                    aliases = sum(isinstance(token, AliasToken) for token in yaml.scan(text))
+                    if aliases > MAX_YAML_ALIASES:
+                        raise yaml.YAMLError("alias limit exceeded")
+                    _raise_if_timed_out(deadline)
+                    mapping = _document_mapping(ci_type, text)
+                    _raise_if_timed_out(deadline)
+                    facts = {"jobs": _jobs(ci_type, mapping)}
+                    state = EvidenceState.AVAILABLE
+            except SafeOpenFailure as exc:
+                if exc.reason != "missing":
+                    state = EvidenceState.LIMITED
+                    facts = {"reason": "unreadable_file"}
             except (UnicodeDecodeError, yaml.YAMLError):
                 state = EvidenceState.LIMITED
                 facts = {"reason": "unsafe_or_invalid_yaml"}
             except OSError:
                 state = EvidenceState.LIMITED
                 facts = {"reason": "unreadable_file"}
+            finally:
+                if opened is not None:
+                    opened.close()
             evidence.append(
                 Evidence(
                     f"ci:{ci_type}:{subject}",

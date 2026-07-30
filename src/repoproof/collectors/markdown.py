@@ -7,7 +7,7 @@ from repoproof.collectors.base import AuditContext, collector_provenance
 from repoproof.domain import Evidence, EvidenceState
 from repoproof.errors import RuntimeFailure
 from repoproof.profile.models import MarkdownSectionsRule, Profile
-from repoproof.security import resolve_under_root
+from repoproof.security import SafeOpenFailure, open_regular_file
 
 MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
 COMMIT_RE = re.compile(r"(?<!\w)(?:[0-9a-f]{7,40})(?!\w)", re.IGNORECASE)
@@ -35,21 +35,10 @@ class MarkdownCollector:
         evidence: list[Evidence] = []
         for subject in subjects:
             _raise_if_timed_out(deadline)
-            path = resolve_under_root(context.root, subject)
+            opened = None
             try:
-                if not path.is_file():
-                    evidence.append(
-                        Evidence(
-                            f"markdown:{subject}",
-                            "markdown",
-                            subject,
-                            EvidenceState.UNAVAILABLE,
-                            {},
-                            collector_provenance(context, self.name),
-                        )
-                    )
-                    continue
-                if path.stat().st_size > read_limit:
+                opened = open_regular_file(context.root, subject)
+                if opened.size > read_limit:
                     evidence.append(
                         Evidence(
                             f"markdown:{subject}",
@@ -61,7 +50,25 @@ class MarkdownCollector:
                         )
                     )
                     continue
-                text = path.read_text(encoding="utf-8")
+                text = opened.stream.read().decode("utf-8")
+            except SafeOpenFailure as exc:
+                state = (
+                    EvidenceState.UNAVAILABLE
+                    if exc.reason == "missing"
+                    else EvidenceState.LIMITED
+                )
+                facts = {} if state is EvidenceState.UNAVAILABLE else {"reason": "unreadable_file"}
+                evidence.append(
+                    Evidence(
+                        f"markdown:{subject}",
+                        "markdown",
+                        subject,
+                        state,
+                        facts,
+                        collector_provenance(context, self.name),
+                    )
+                )
+                continue
             except UnicodeDecodeError:
                 evidence.append(
                     Evidence(
@@ -86,6 +93,9 @@ class MarkdownCollector:
                     )
                 )
                 continue
+            finally:
+                if opened is not None:
+                    opened.close()
             _raise_if_timed_out(deadline)
             tokens = MarkdownIt().parse(text)
             _raise_if_timed_out(deadline)
