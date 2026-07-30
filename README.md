@@ -47,16 +47,25 @@ python -m pytest tests/performance -m performance -q
 
 ## 分发
 
-发布后，从 GitHub Release 下载
-`repoproof-<version>-windows-x86_64.exe` 及同名 `.sha256` 文件，并以
+从公开的
+[RepoProof v1.0.0 GitHub Release](https://github.com/zhuangyifan-666/njuise-2026-summer/releases/tag/v1.0.0)
+下载 `repoproof-1.0.0-windows-x86_64.exe` 及
+`repoproof-1.0.0-windows-x86_64.exe.sha256`，并以
 `Get-FileHash -Algorithm SHA256` 核对哈希。1.0 的 Windows x64 单文件程序未作
 Authenticode 签名，Windows SmartScreen 可能显示警告；核对校验和后再决定是否
 运行。也可以按“安装”中的方式从源码运行。具体 PowerShell 校验步骤见
 [`RELEASE.md`](RELEASE.md)。
 
-当前源码版本已更新为 `1.0.0` 发布候选，并包含生成该资产的 tag 触发 Release
-workflow；尚未创建发布 tag、GitHub Release 或托管构建结果。真实下载链接与校验
-证据将在托管 CI 完成后补充，不以本地候选状态替代。
+`v1.0.0` 指向提交
+[`3fbef7f`](https://github.com/zhuangyifan-666/njuise-2026-summer/commit/3fbef7fe9d2afe374601a710ced1547170c58177)。
+发布工作流已[成功完成](https://github.com/zhuangyifan-666/njuise-2026-summer/actions/runs/30513757894)，
+Release 不是 draft 或 prerelease。下载后校验所得 SHA-256 为
+`5a25ea58aa10cef191a8546eb15a967395ba3c40e42af9773d29cb340b067e54`；
+二进制输出 `repoproof 1.0.0`，对合规夹具的离线审计结果为
+`10 PASS / 0 SKIP / 0 FAIL`。
+
+上述 URL 与下载验证结果是在 `v1.0.0` tag 创建后回填的发布证据，不属于该 tag
+对应的源码归档内容；tag 与 Release 资产本身仍固定在上述合并提交。
 
 ## 目录结构
 
@@ -87,5 +96,5 @@ RepoProof 默认只读；报告写入必须由用户显式指定 `--output`。�
 权限或网络不可用而不完整；相应规则会按证据状态降级而非猜测。Secret 检测是有限
 模式与熵检查，仍可能误报或漏报，不能替代专业 SAST 或完整 Secret 扫描产品。
 
-1.0 仅计划发布未签名的 Windows x64 二进制；macOS/Linux 可从源码安装，但不承诺
+1.0 已发布未签名的 Windows x64 二进制；macOS/Linux 可从源码安装，但不承诺
 原生单文件二进制。

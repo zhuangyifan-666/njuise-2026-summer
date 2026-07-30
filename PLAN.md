@@ -19,7 +19,7 @@ Canonical implementation steps:
 | 12 | Acceptance and security behavior evidence | completed | `528c87d` — test: prove RepoProof acceptance and security behavior |
 | 13 | CI, Windows packaging, and Release automation | completed | `e709c69` — ci: verify package and publish Windows releases |
 | 14 | Course documentation, reflection, and process evidence | completed | `817c91b` — docs: complete RepoProof delivery evidence |
-| 15 | Final review, PR, tag, and public Release verification | in progress | local 1.0.0 release candidate prepared; PR, hosted CI, tag, and Release pending |
+| 15 | Final review, PR, tag, and public Release verification | completed | `8eea3b5` — release: prepare RepoProof 1.0.0; merged and tagged at `3fbef7f` |
 
 The table records feature commits only. Subsequent hardening and documentation commits remain
 visible in Git history but do not replace the focused deliverable evidence above.
