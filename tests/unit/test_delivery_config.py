@@ -79,7 +79,9 @@ def test_ci_runs_the_supported_python_versions_with_read_only_permissions() -> N
         "Type-check",
         "Test",
     ]
-    assert _step_index(steps, uses="actions/checkout@v4") < _step_index(
+    checkout_index = _step_index(steps, uses="actions/checkout@v4")
+    assert steps[checkout_index]["with"] == {"fetch-depth": 0}
+    assert checkout_index < _step_index(
         steps, uses="actions/setup-python@v5"
     )
 
