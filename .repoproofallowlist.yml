@@ -1,0 +1,47 @@
+schema: 1
+entries:
+  - rule_id: security.secrets
+    path: src/repoproof/reporting/model.py
+    fingerprint: "03d104c6"
+  - rule_id: security.secrets
+    path: tests/integration/collectors/test_secret_non_disclosure.py
+    fingerprint: "8bcac790"
+  - rule_id: security.secrets
+    path: tests/integration/test_cli_audit.py
+    fingerprint: "6675cd0c"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "f2195fcf"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "03d104c6"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "8bcac790"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "58dae340"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "62785246"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "ab5351dd"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "59f397b2"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "486fb3c5"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "838a119e"
+  - rule_id: security.secrets
+    path: tests/unit/reporting/test_hardening.py
+    fingerprint: "8bcac790"
+  - rule_id: security.secrets
+    path: tests/unit/test_github.py
+    fingerprint: "fee72bbe"
+  - rule_id: security.secrets
+    path: tests/unit/test_github.py
+    fingerprint: "fee72bbe"

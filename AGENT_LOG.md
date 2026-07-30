@@ -158,3 +158,42 @@
 - **基线**：Task 1 前尚无 `pyproject.toml` 或测试套件；环境未安装 pytest；`git diff --check` 通过。
 - **执行前冲突**：Task 13/14/15 原计划包含源码文本断言，与行为测试准则冲突。
 - **人工裁决**：学生批准改用解析后的 CI 结构与真实构建、RepoProof 自审结果、安装后 CLI/元数据验证。
+
+## 2026-07-30
+
+### P2 · Task 14：课程文档与过程证据
+
+- **技能 / 工作流**：在指定隔离工作树中使用 `executing-plans`、
+  `using-git-worktrees`、`test-driven-development` 与
+  `verification-before-completion`；本任务是已批准实现计划的第 14 项。
+- **RED 证据**：先新增
+  `tests/unit/test_course_documents.py::test_course_documents_pass_the_bundled_profile`，
+  运行 `python -m pytest tests/unit/test_course_documents.py -q`。结果为 1 failed、
+  退出码 1，因课程文档、README 章节和执行台账尚未完整，符合预期。
+- **实现范围**：补充 README、REFLECTION、根目录 PLAN 台账，并更新本日志和
+  `SPEC_PROCESS.md`；测试仅审计 RepoProof 对这些可观察文档规则的实际输出，未加入
+  源码文本 checklist 矩阵。
+- **规格符合性复核**：对照 `SPEC.md` 的 AC-19/AC-20、内置 `ai4se-b` profile 和
+  Task 14 brief，要求的文档、README 八个章节、`unit-test` job 与已完成 Task 1–13
+  的 Git 证据均已逐项纳入待验证产物。
+- **既有功能提交证据**：`PLAN.md` 记录 Task 1–13 的实际 feature commits：
+  `7d4fbc2`、`3f84d4e`、`e82f704`、`b23078a`、`a6e543d`、`ac29429`、`f9bc805`、
+  `ee2a770`、`2d81795`、`4f678d8`、`2480808`、`528c87d`、`e709c69`。
+- **人工动作**：本项没有新增人工审批、PR、托管 CI 或 Release；这些事实保持待办，
+  不以本地文档替代。
+- **GREEN 与自审证据**：再次运行
+  `python -m pytest tests/unit/test_course_documents.py -q` 得到 `1 passed`。运行
+  `python -m repoproof audit --profile ai4se-b --offline --format json --output build/self-audit.json .`
+  的摘要为 `FAIL: 0, WARN: 0, SKIP: 1, PASS: 9, exit_code: 0`；唯一 SKIP 是离线且
+  无本地 merge 时无法取得可选远程 PR 过程证据，详见 `REFLECTION.md`。`build/` 受
+  `.gitignore` 忽略，报告不纳入版本控制。
+- **代码质量复核**：`python -m ruff check src tests` 输出 `All checks passed!`；
+  `python -m mypy src` 输出 `Success: no issues found in 30 source files`；
+  `git diff --check` 退出 0。首次 Ruff 仅发现新测试多余空行（I001），已作单行
+  格式修复并复跑通过。
+- **完整本地验证**：当前 Windows 环境没有 `make` 命令，因此 `make verify` 不能
+  启动（命令未找到）。已读取 `Makefile`，并按其 `verify` 目标的三个精确子命令运行：
+  Ruff、mypy 和 `python -m pytest`；默认测试结果为 `196 passed, 5 skipped, 1 deselected`
+  （8.27 秒）。这不是托管 CI，也不宣称 `make verify` 在本机已执行。
+- **Task 14 提交**：待本次文档提交实际创建后记录；按台账规则，Task 14 在提交前
+  保持 `in progress`，由后续 Task 15 决定最终台账状态。

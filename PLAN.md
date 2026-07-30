@@ -1,34 +1,25 @@
 # RepoProof Execution Plan
 
 Canonical implementation steps:
-[`docs/superpowers/plans/2026-07-29-repoproof-implementation.md`](docs/superpowers/plans/2026-07-29-repoproof-implementation.md).
-
-This ledger records implementation evidence. A row changes to `completed` only after its focused
-feature commit exists; the actual 7–40 hexadecimal commit hash replaces
-`not applicable until completion`.
+`docs/superpowers/plans/2026-07-29-repoproof-implementation.md`.
 
 | Task | Deliverable | Status | Evidence commit |
 |---|---|---|---|
-| 1 | Package and domain contract | pending | not applicable until completion |
-| 2 | Profile schema and bundled policy | pending | not applicable until completion |
-| 3 | Secure bounded file inventory | pending | not applicable until completion |
-| 4 | Markdown, CI, and distribution evidence | pending | not applicable until completion |
-| 5 | Local Git evidence | pending | not applicable until completion |
-| 6 | Non-disclosing Secret evidence | pending | not applicable until completion |
-| 7 | Pure six-rule engine | pending | not applicable until completion |
-| 8 | Console, JSON, and HTML reports | pending | not applicable until completion |
-| 9 | Offline application service and audit CLI | pending | not applicable until completion |
-| 10 | Keyring credential lifecycle | pending | not applicable until completion |
-| 11 | Optional GitHub evidence and degradation | pending | not applicable until completion |
-| 12 | Acceptance, security, and performance tests | pending | not applicable until completion |
-| 13 | CI, Windows packaging, and Release automation | pending | not applicable until completion |
-| 14 | Course documentation and process evidence | pending | not applicable until completion |
-| 15 | Review, PR, tag, and public Release | pending | not applicable until completion |
+| 1 | Package and domain contract | completed | `7d4fbc2` — build: establish RepoProof package and domain contract |
+| 2 | Profile schema and bundled policy | completed | `3f84d4e` — feat: add strict profiles and AI4SE policy |
+| 3 | Bounded repository file evidence | completed | `e82f704` — feat: collect bounded repository file evidence |
+| 4 | Markdown, CI, and distribution evidence | completed | `b23078a` — feat: collect markdown CI and distribution evidence |
+| 5 | Bounded local Git evidence | completed | `a6e543d` — feat: collect bounded local Git evidence |
+| 6 | Non-disclosing Secret evidence | completed | `ac29429` — feat: add non-disclosing secret evidence |
+| 7 | Deterministic rule evaluation | completed | `f9bc805` — feat: add deterministic rule evaluation |
+| 8 | Deterministic console, JSON, and HTML reports | completed | `ee2a770` — feat: render deterministic console JSON and HTML reports |
+| 9 | Offline repository-audit CLI | completed | `2d81795` — feat: expose offline repository audit CLI |
+| 10 | GitHub credential lifecycle through keyring | completed | `4f678d8` — feat: manage GitHub credentials through keyring |
+| 11 | Optional sanitized GitHub evidence | completed | `2480808` — feat: add optional sanitized GitHub evidence |
+| 12 | Acceptance and security behavior evidence | completed | `528c87d` — test: prove RepoProof acceptance and security behavior |
+| 13 | CI, Windows packaging, and Release automation | completed | `e709c69` — ci: verify package and publish Windows releases |
+| 14 | Course documentation, reflection, and process evidence | in progress | pending Task 14 commit |
+| 15 | Final review, PR, tag, and public Release verification | pending | not applicable until completion |
 
-## Execution rules
-
-- Follow tasks in dependency order.
-- Apply Red → Green → Refactor within every task.
-- Run the task's focused checks and the current full suite before committing.
-- Perform specification-compliance review before code-quality review.
-- Record only commands, reviews, approvals, CI runs, PRs, Releases, and hashes that actually exist.
+The table records feature commits only. Subsequent hardening and documentation commits remain
+visible in Git history but do not replace the focused deliverable evidence above.
