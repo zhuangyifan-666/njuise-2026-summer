@@ -1,0 +1,80 @@
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from repoproof.cli import app
+
+try:
+    from click.utils import strip_ansi
+except ModuleNotFoundError:
+    from typer._click.utils import strip_ansi
+
+
+def test_help_includes_minimal_runnable_audit_example() -> None:
+    result = CliRunner().invoke(app, ["--help"], color=False)
+
+    assert result.exit_code == 0
+    assert "repoproof audit --profile ai4se-b --offline ." in strip_ansi(result.stdout)
+
+
+def test_nonexistent_repository_exits_three(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["audit", str(tmp_path / "missing")])
+
+    assert result.exit_code == 3
+    assert "repository" in result.stderr.casefold()
+
+
+def test_invalid_profile_exits_two(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["audit", str(tmp_path), "--profile", "missing.yml"])
+
+    assert result.exit_code == 2
+    assert "profile" in result.stderr.casefold()
+
+
+def test_malformed_profile_diagnostic_redacts_canary(tmp_path: Path) -> None:
+    canary = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
+    profile = tmp_path / "invalid.yml"
+    profile.write_text(
+        "schema: 1\nname: test-policy\ndescription: test\nrules:\n"
+        "  - id: docs.spec\n    type: path_exists\n    severity: error\n"
+        f"    params: {{paths: [SPEC.md], unknown: {canary}}}\n"
+        "    remediation: Add it.\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["audit", str(tmp_path), "--profile", str(profile)])
+
+    assert result.exit_code == 2
+    assert canary not in result.stdout
+    assert canary not in result.stderr
+    pending = [result.exception]
+    seen: set[int] = set()
+    while pending:
+        exception = pending.pop()
+        if exception is None or id(exception) in seen:
+            continue
+        seen.add(id(exception))
+        detail = repr(exception)
+        assert canary not in detail
+        assert "ValidationError" not in detail
+        assert "input_value" not in detail
+        pending.extend((exception.__cause__, exception.__context__))
+    assert "profile" in result.stderr.casefold()
+    assert "fix:" in result.stderr.casefold()
+
+
+def test_passing_audit_exits_zero(tmp_path: Path) -> None:
+    profile = tmp_path / "profile.yml"
+    profile.write_text(
+        "schema: 1\nname: test-policy\ndescription: test\nrules:\n"
+        "  - id: docs.spec\n    type: path_exists\n    severity: error\n"
+        "    params: {paths: [SPEC.md]}\n    remediation: Add it.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "SPEC.md").write_text("spec", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app, ["audit", str(tmp_path), "--offline", "--profile", str(profile)]
+    )
+
+    assert result.exit_code == 0

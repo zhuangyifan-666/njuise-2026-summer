@@ -30,6 +30,7 @@ build/
 Thumbs.db
 
 # Project-local generated output
+.worktrees/
 .superpowers/
 .repoproof/
 reports/

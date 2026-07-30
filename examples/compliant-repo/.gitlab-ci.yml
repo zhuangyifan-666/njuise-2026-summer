@@ -1,0 +1,4 @@
+unit-test:
+  image: python:3.12
+  script:
+    - python -m pytest

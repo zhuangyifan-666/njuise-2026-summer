@@ -74,3 +74,151 @@
 - **额外工具**：为核对 Codex 插件机制，注册 OpenAI 官方文档 MCP；使用命令级临时覆盖绕过当前 CLI 对全局 `service_tier = "priority"` 的兼容问题，未修改用户全局模型配置。
 - **偏离说明**：由于 Codex CLI 的非交互接口只能注册 marketplace，无法执行 UI 中的插件安装动作，本次使用同一官方仓库、同一固定版本的完整技能集安装作为兼容方案。后续所有必需 Superpowers 技能将逐项触发并记录。
 - **教训**：必须区分“注册 marketplace”“插件 UI 安装”和“技能实际可发现”三个状态，不能仅看到源码缓存就声称安装成功。
+
+### 16:55–17:00 · P1 · Superpowers brainstorming：定位收敛
+
+- **触发技能**：`using-superpowers`、`brainstorming`。
+- **关键问题**：项目应做通用审计、AI4SE 专用检查，还是安全扫描？
+- **采用方案**：通用声明式策略引擎，并内置 AI4SE B 类作业 profile。
+- **推翻方案**：
+  - 放弃硬编码课程检查清单，因为复用性与工程深度不足。
+  - 放弃安全扫描器主线，因为会偏离交付证据治理并扩大误报治理范围。
+- **当前边界**：离线优先、默认只读、无自主 Agent、无 LLM 依赖、CLI + GitHub Release。
+- **详细证据**：见 `SPEC_PROCESS.md` 的“迭代 1”。
+- **门禁**：设计尚未得到学生批准，不得生成实现或调用实现技能。
+
+### P1 · 设计签字 1：产品边界
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：本地只读审计；检查文档、CI、Git 过程、分发与疑似凭据；输出终端/JSON/HTML 报告与稳定退出码；不自动修复、不上传源码、不依赖 LLM、首版不开发 WebUI。
+- **影响**：允许继续呈现架构设计，但在全部设计批准前仍不得实现。
+
+### P1 · 设计签字 2：架构与模块
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：CLI、Profile、Collectors、Rule Engine、Reporters、Credential Store / GitHub Gateway 的分层架构，以及 Profile、Rule、Evidence、Finding、AuditReport 核心实体。
+- **影响**：模块可独立测试；继续细化规则语义、错误与安全设计。
+
+### P1 · 设计签字 3：规则、错误与安全
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：六类首版规则、四种结果状态、四档稳定退出码、路径围栏、扫描资源上限、Secret 脱敏、系统钥匙串和受限 GitHub HTTPS 访问。
+- **影响**：安全机制和错误语义已具备可测试的客观边界；继续确认技术栈、测试与分发。
+
+### P1 · 设计签字 4 与规约落盘
+
+- **学生反馈**：明确回复“批准”。
+- **批准内容**：Python 技术栈、分层测试、性能目标、GitHub/GitLab CI 和 Windows x64 GitHub Release。
+- **产物**：`SPEC.md`、`docs/superpowers/specs/2026-07-29-repoproof-design.md`。
+- **人工干预**：四节设计均由学生逐节批准；文档细化由 Codex 完成。
+- **门禁**：对书面 SPEC 完成自审并由学生最终审阅后，才允许进入 `writing-plans`。
+
+### P1 · 规约自审
+
+- **触发技能**：`brainstorming` 的 Spec Self-Review。
+- **检查**：占位符、内部一致性、范围、歧义、whitespace。
+- **修正**：
+  - 明确本地 merge / 远程 PR Evidence 与 `git_history` 的关系。
+  - 明确本地 Release workflow / 远程 Release Evidence 与 `distribution_ready` 的关系。
+  - 将 `SPEC_PROCESS.md` 的历史“前置准备”状态更新为已完成设计、等待书面审阅。
+- **证据**：8 个唯一用户故事；20 个唯一验收标准；占位符扫描为 0；`git diff --check` 无错误。
+- **门禁**：学生尚需审阅已落盘的书面 `SPEC.md`。
+
+### P1 · 最终书面规约批准与计划启动
+
+- **学生反馈**：审阅已提交规格后明确回复“批准”。
+- **规格提交**：`15de2c7`（`docs: define RepoProof specification`）。
+- **触发技能**：`writing-plans`。
+- **边界澄清**：PLAN 已完成项 commit 证据由 `markdown_sections` 的可选 checklist 检查实现，保持六种预定义规则不变。
+- **安全澄清**：Secret allowlist 使用严格的 `.repoproofallowlist.yml`，只能记录规则 ID、相对路径和 8 位短指纹。
+- **覆盖澄清**：Profile 使用可选 `manual_checks` 承载反思质量、模块职责等人工复核内容；三种报告展示但不计入自动状态。
+- **当前门禁**：先完成实现计划、自审和提交，再由学生选择 Subagent-Driven 或 Inline Execution。
+
+### P1 · 实现计划完成与自审
+
+- **技能**：`writing-plans`。
+- **产物**：`docs/superpowers/plans/2026-07-29-repoproof-implementation.md`、`PLAN.md`。
+- **任务拆分**：15 个有序 TDD Task，覆盖领域模型、Profile、Collectors、Rule Engine、Reporters、CLI、凭据、GitHub、验收、性能、CI、打包、课程文档和 Release。
+- **自审修正**：
+  - PLAN commit 证据归入 `markdown_sections` 可选检查，不扩张六种规则。
+  - Secret allowlist 固定为无原文的严格结构，并支持多条 Secret 规则各自过滤。
+  - Profile 路径统一使用 `SafeRepoPath`。
+  - GitHub Collector 改为本地 Git 证据之后才创建的 factory。
+  - Evidence provenance 使用应用层注入的统一 snapshot 时间。
+  - 人工质量要求使用 `manual_checks` 进入三种报告而不影响退出码。
+- **机械证据**：Task 1–15 各一次；AC-01–20 全覆盖；240 个 fence 配对；禁止未来工作语言 0；`git diff --check` 无错误。
+- **人工干预**：本阶段无需新增人工输入。
+- **下一门禁**：提交计划后由学生选择执行方式。
+
+### P1 · Subagent-Driven 执行启动
+
+- **学生选择**：Subagent-Driven Development。
+- **隔离工作树**：`.worktrees/repoproof-implementation`，分支 `agent/implementation-repoproof`。
+- **技能**：`using-git-worktrees`、`subagent-driven-development`、`test-driven-development`。
+- **基线**：Task 1 前尚无 `pyproject.toml` 或测试套件；环境未安装 pytest；`git diff --check` 通过。
+- **执行前冲突**：Task 13/14/15 原计划包含源码文本断言，与行为测试准则冲突。
+- **人工裁决**：学生批准改用解析后的 CI 结构与真实构建、RepoProof 自审结果、安装后 CLI/元数据验证。
+
+## 2026-07-30
+
+### P2 · Task 14：课程文档与过程证据
+
+- **技能 / 工作流**：在指定隔离工作树中使用 `executing-plans`、
+  `using-git-worktrees`、`test-driven-development` 与
+  `verification-before-completion`；本任务是已批准实现计划的第 14 项。
+- **RED 证据**：先新增
+  `tests/unit/test_course_documents.py::test_course_documents_pass_the_bundled_profile`，
+  运行 `python -m pytest tests/unit/test_course_documents.py -q`。结果为 1 failed、
+  退出码 1，因课程文档、README 章节和执行台账尚未完整，符合预期。
+- **实现范围**：补充 README、REFLECTION、根目录 PLAN 台账，并更新本日志和
+  `SPEC_PROCESS.md`；测试仅审计 RepoProof 对这些可观察文档规则的实际输出，未加入
+  源码文本 checklist 矩阵。
+- **规格符合性复核**：对照 `SPEC.md` 的 AC-19/AC-20、内置 `ai4se-b` profile 和
+  Task 14 brief，要求的文档、README 八个章节、`unit-test` job 与已完成 Task 1–13
+  的 Git 证据均已逐项纳入待验证产物。
+- **既有功能提交证据**：`PLAN.md` 记录 Task 1–13 的实际 feature commits：
+  `7d4fbc2`、`3f84d4e`、`e82f704`、`b23078a`、`a6e543d`、`ac29429`、`f9bc805`、
+  `ee2a770`、`2d81795`、`4f678d8`、`2480808`、`528c87d`、`e709c69`。
+- **人工动作**：本项没有新增人工审批、PR、托管 CI 或 Release；这些事实保持待办，
+  不以本地文档替代。
+- **GREEN 与自审证据**：再次运行
+  `python -m pytest tests/unit/test_course_documents.py -q` 得到 `1 passed`。运行
+  `python -m repoproof audit --profile ai4se-b --offline --format json --output build/self-audit.json .`
+  的摘要为 `FAIL: 0, WARN: 0, SKIP: 1, PASS: 9, exit_code: 0`；唯一 SKIP 是离线且
+  无本地 merge 时无法取得可选远程 PR 过程证据，详见 `REFLECTION.md`。`build/` 受
+  `.gitignore` 忽略，报告不纳入版本控制。
+- **代码质量复核**：`python -m ruff check src tests` 输出 `All checks passed!`；
+  `python -m mypy src` 输出 `Success: no issues found in 30 source files`；
+  `git diff --check` 退出 0。首次 Ruff 仅发现新测试多余空行（I001），已作单行
+  格式修复并复跑通过。
+- **完整本地验证**：当前 Windows 环境没有 `make` 命令，因此 `make verify` 不能
+  启动（命令未找到）。已读取 `Makefile`，并按其 `verify` 目标的三个精确子命令运行：
+  Ruff、mypy 和 `python -m pytest`；默认测试结果为 `196 passed, 5 skipped, 1 deselected`
+  （8.27 秒）。这不是托管 CI，也不宣称 `make verify` 在本机已执行。
+- **Task 14 提交**：`817c91b`（`docs: complete RepoProof delivery evidence`）已创建，
+  因此 `PLAN.md` 的 Task 14 已标为 completed。后续本条目只作台账收尾，不替换该
+  feature commit。
+- **复核状态**：本地规格符合性复核（AC-19/AC-20 与内置 profile）和代码质量复核
+  （Ruff、mypy、`git diff --check`）均已完成；尚无独立 PR 评审、托管 CI、tag 或
+  Release，仍由 Task 15 在真实外部动作完成后记录。
+
+### P2 · Task 15：1.0.0 本地发布候选
+
+- **范围**：本阶段只准备本地 release candidate，不 push、不创建 PR、不创建 tag
+  或 Release；Task 15 在外部发布及资产验证完成前保持 `in progress`。
+- **RED 证据**：先新增
+  `tests/unit/test_delivery_config.py::test_installed_cli_reports_release_version`，
+  运行聚焦测试得到 `1 failed`；安装后元数据实际为 `0.1.0`，与预期 `1.0.0`
+  不符，失败原因正确。
+- **最小实现**：将 `pyproject.toml` 和 `src/repoproof/__init__.py` 的版本同时更新为
+  `1.0.0`，以 editable 模式重新安装。测试使用真实安装元数据及 Typer CLI 输出，
+  不读取或断言源码文本。
+- **GREEN 证据**：重新安装后复跑同一聚焦测试，结果为 `1 passed`，CLI 输出为
+  `repoproof 1.0.0`，安装元数据为 `1.0.0`。
+- **仓库卫生**：三份误跟踪的 `.superpowers` 内部 task report 已仅从 Git 索引移除；
+  本地副本仍存在并由 `.gitignore` 覆盖，不属于课程交付产物。
+- **验证策略**：按学生“减少不必要测试、能通过作业验收即可”的要求，本阶段仅运行
+  版本聚焦测试、与文档变更直接相关的最小测试、Ruff、mypy 和
+  `git diff --check`；完整 pytest、性能和 PyInstaller 由发布前统一验收门禁执行。
+- **外部状态**：PR、托管 CI、`v1.0.0` tag、GitHub Release、可下载 Windows 资产及
+  checksum 验证仍为 pending；此处不预填 URL 或结果。
