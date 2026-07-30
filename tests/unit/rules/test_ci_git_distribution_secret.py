@@ -500,6 +500,40 @@ def test_secret_message_never_contains_raw_value_and_respects_rule_allowlist() -
     assert evaluate(policy, [allowlisted])[0].status is FindingStatus.PASS
 
 
+def test_limited_secret_evidence_with_confirmed_match_still_fails() -> None:
+    """Catches match-cap evidence being treated as inconclusive despite a confirmed secret."""
+    policy = profile(
+        {
+            "id": "security.secrets",
+            "type": "secret_scan",
+            "severity": "error",
+            "params": {"categories": ["token"], "exclude_paths": []},
+            "remediation": "Remove it.",
+        }
+    )
+    evidence = Evidence(
+        "secrets:scan",
+        "secret_scan",
+        ".",
+        EvidenceState.LIMITED,
+        {
+            "matches": (
+                {
+                    "category": "token",
+                    "path": "src/x.py",
+                    "line": 9,
+                    "fingerprint": "deadbeef",
+                    "triggered_for": ("security.secrets",),
+                    "allowlisted_for": (),
+                },
+            )
+        },
+        {},
+    )
+
+    assert evaluate(policy, [evidence])[0].status is FindingStatus.FAIL
+
+
 def test_legacy_secret_match_without_triggered_rules_skips() -> None:
     policy = profile(
         {

@@ -370,7 +370,7 @@ def _secret_matches(
 
 def _secret(rule: SecretScanRule, evidence: Sequence[Evidence]) -> Finding:
     item = _find(evidence, "secret_scan")
-    if item is None or item.state is not EvidenceState.AVAILABLE:
+    if item is None:
         return _result(rule, None, "Secret scan evidence is unavailable.")
     matches = _secret_matches(item.facts.get("matches"), rule)
     if matches is None:
@@ -384,6 +384,8 @@ def _secret(rule: SecretScanRule, evidence: Sequence[Evidence]) -> Finding:
         if not matches
         else f"Secret scan found {len(matches)} suspected values: <redacted>; {safe_details}."
     )
+    if not matches and item.state is not EvidenceState.AVAILABLE:
+        return _result(rule, None, "Secret scan evidence is incomplete.", (item.id,))
     return _result(rule, not matches, message, (item.id,), locations)
 
 
