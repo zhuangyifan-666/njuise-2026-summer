@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: python -m ruff check src tests
+      - name: Type-check
+        run: python -m mypy src
+      - name: Test
+        run: python -m pytest
+      - name: Build one-file executable
+        run: python -m PyInstaller --clean --noconfirm repoproof.spec
+      - name: Name, smoke-test, and checksum the release asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $name = "repoproof-$version-windows-x86_64.exe"
+          Move-Item -LiteralPath dist/repoproof.exe -Destination "dist/$name"
+          "ASSET_NAME=$name" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          & "dist/$name" version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & "dist/$name" audit examples/compliant-repo --offline --format json
+          $auditExit = $LASTEXITCODE
+          if ($auditExit -notin 0, 1) { exit $auditExit }
+
+          ./scripts/write_checksum.ps1 -Path "dist/$name" -Output "dist/$name.sha256"
+          $expected = (Get-Content -LiteralPath "dist/$name.sha256" -Raw).Trim()
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath "dist/$name").Hash.ToLowerInvariant()
+          if ($expected -ne "$actual  $name") { throw "Checksum verification failed." }
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repoproof-windows-x86_64
+          path: |
+            dist/${{ env.ASSET_NAME }}
+            dist/${{ env.ASSET_NAME }}.sha256
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/${{ env.ASSET_NAME }}
+            dist/${{ env.ASSET_NAME }}.sha256
