@@ -3,7 +3,7 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from repoproof.errors import UsageFailure
 
@@ -14,6 +14,11 @@ class SafeOpenFailure(Exception):
     def __init__(self, reason: str = "unsafe") -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+def _windows_api(module: object, name: str) -> Any:
+    """Resolve a Windows-only symbol without requiring it in non-Windows typeshed."""
+    return getattr(module, name)
 
 
 @dataclass(slots=True)
@@ -82,7 +87,7 @@ def _raw_windows_open_root(root: Path) -> tuple[str | None, int | None]:
 
     owned_handle: int | None = None
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _windows_api(ctypes, "WinDLL")("kernel32", use_last_error=True)
         create_file = kernel32.CreateFileW
         create_file.argtypes = [
             wintypes.LPCWSTR,
@@ -104,7 +109,7 @@ def _raw_windows_open_root(root: Path) -> tuple[str | None, int | None]:
             None,
         )
         if raw_handle == wintypes.HANDLE(-1).value:
-            return (_windows_error_reason(ctypes.get_last_error()), None)
+            return (_windows_error_reason(_windows_api(ctypes, "get_last_error")()), None)
         if raw_handle is None:
             return ("operational", None)
         owned_handle = int(raw_handle)
@@ -169,7 +174,7 @@ def _raw_windows_open_relative(
             None,
         )
         io_status = IoStatusBlock()
-        ntdll = ctypes.WinDLL("ntdll")
+        ntdll = _windows_api(ctypes, "WinDLL")("ntdll")
         nt_open_file = ntdll.NtOpenFile
         nt_open_file.argtypes = [
             ctypes.POINTER(wintypes.HANDLE),
@@ -241,7 +246,7 @@ def _raw_windows_handle_information(
         class AttributeTagInfo(ctypes.Structure):
             _fields_ = [("attributes", wintypes.DWORD), ("tag", wintypes.DWORD)]
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _windows_api(ctypes, "WinDLL")("kernel32", use_last_error=True)
         get_info = kernel32.GetFileInformationByHandleEx
         get_info.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
         get_info.restype = wintypes.BOOL
@@ -259,7 +264,7 @@ def _raw_windows_final_path(handle: int) -> tuple[str | None, str | None]:
     from ctypes import wintypes
 
     try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = _windows_api(ctypes, "WinDLL")("kernel32", use_last_error=True)
         get_final_path = kernel32.GetFinalPathNameByHandleW
         get_final_path.argtypes = [
             wintypes.HANDLE,
@@ -318,7 +323,9 @@ def _raw_windows_handle_to_file(
     descriptor: int | None = None
     transferred = False
     try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        open_osfhandle = _windows_api(msvcrt, "open_osfhandle")
+        binary_flag = _windows_api(os, "O_BINARY")
+        descriptor = open_osfhandle(handle, os.O_RDONLY | binary_flag)
         transferred = True
         file_stat = os.fstat(descriptor)
         if not stat.S_ISREG(file_stat.st_mode):
@@ -341,7 +348,7 @@ def _close_windows_handle(handle: int) -> None:
     from ctypes import wintypes
 
     try:
-        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32 = _windows_api(ctypes, "WinDLL")("kernel32")
         close_handle = kernel32.CloseHandle
         close_handle.argtypes = [wintypes.HANDLE]
         close_handle.restype = wintypes.BOOL
