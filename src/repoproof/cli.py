@@ -17,7 +17,11 @@ from repoproof.reporting.html_reporter import render_html
 from repoproof.reporting.json_reporter import render_json
 from repoproof.reporting.output import atomic_write_text
 
-app = typer.Typer(no_args_is_help=True, help="Audit repository release readiness.")
+app = typer.Typer(
+    no_args_is_help=True,
+    help="Audit repository release readiness.",
+    epilog="Example: repoproof audit --profile ai4se-b --offline .",
+)
 profile_app = typer.Typer(help="Inspect and validate audit profiles.")
 app.add_typer(profile_app, name="profile")
 auth_app = typer.Typer(help="Manage optional GitHub credentials in the OS keyring.")

@@ -5,6 +5,13 @@ from typer.testing import CliRunner
 from repoproof.cli import app
 
 
+def test_help_includes_minimal_runnable_audit_example() -> None:
+    result = CliRunner().invoke(app, ["--help"], color=False)
+
+    assert result.exit_code == 0
+    assert "repoproof audit --profile ai4se-b --offline ." in result.stdout
+
+
 def test_nonexistent_repository_exits_three(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["audit", str(tmp_path / "missing")])
 
