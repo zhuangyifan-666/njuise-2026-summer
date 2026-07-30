@@ -201,3 +201,24 @@
 - **复核状态**：本地规格符合性复核（AC-19/AC-20 与内置 profile）和代码质量复核
   （Ruff、mypy、`git diff --check`）均已完成；尚无独立 PR 评审、托管 CI、tag 或
   Release，仍由 Task 15 在真实外部动作完成后记录。
+
+### P2 · Task 15：1.0.0 本地发布候选
+
+- **范围**：本阶段只准备本地 release candidate，不 push、不创建 PR、不创建 tag
+  或 Release；Task 15 在外部发布及资产验证完成前保持 `in progress`。
+- **RED 证据**：先新增
+  `tests/unit/test_delivery_config.py::test_installed_cli_reports_release_version`，
+  运行聚焦测试得到 `1 failed`；安装后元数据实际为 `0.1.0`，与预期 `1.0.0`
+  不符，失败原因正确。
+- **最小实现**：将 `pyproject.toml` 和 `src/repoproof/__init__.py` 的版本同时更新为
+  `1.0.0`，以 editable 模式重新安装。测试使用真实安装元数据及 Typer CLI 输出，
+  不读取或断言源码文本。
+- **GREEN 证据**：重新安装后复跑同一聚焦测试，结果为 `1 passed`，CLI 输出为
+  `repoproof 1.0.0`，安装元数据为 `1.0.0`。
+- **仓库卫生**：三份误跟踪的 `.superpowers` 内部 task report 已仅从 Git 索引移除；
+  本地副本仍存在并由 `.gitignore` 覆盖，不属于课程交付产物。
+- **验证策略**：按学生“减少不必要测试、能通过作业验收即可”的要求，本阶段仅运行
+  版本聚焦测试、与文档变更直接相关的最小测试、Ruff、mypy 和
+  `git diff --check`；完整 pytest、性能和 PyInstaller 由发布前统一验收门禁执行。
+- **外部状态**：PR、托管 CI、`v1.0.0` tag、GitHub Release、可下载 Windows 资产及
+  checksum 验证仍为 pending；此处不预填 URL 或结果。

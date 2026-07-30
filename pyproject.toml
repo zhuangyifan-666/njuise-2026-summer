@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "repoproof"
-version = "0.1.0"
+version = "1.0.0"
 description = "Deterministic offline-first repository release-readiness auditor"
 readme = "README.md"
 requires-python = ">=3.12"

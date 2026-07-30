@@ -7,7 +7,8 @@ Superpowers brainstorming 的四节设计及最终书面规约均已获得学生
 （`docs: plan RepoProof implementation`）。实现位于隔离分支
 `agent/implementation-repoproof`；Task 14 已以 `817c91b`
 （`docs: complete RepoProof delivery evidence`）完成 AC-19/AC-20 的课程文档与过程
-证据。下方“前置上下文”保留设计开始前的真实历史。
+证据。Task 15 已进入本地 `1.0.0` 发布候选阶段，但尚未完成外部发布。下方“前置
+上下文”保留设计开始前的真实历史。
 
 ## 实现状态与外部证据
 
@@ -15,13 +16,15 @@ Superpowers brainstorming 的四节设计及最终书面规约均已获得学生
   `docs/superpowers/specs/2026-07-29-repoproof-design.md`，实现计划位于
   `docs/superpowers/plans/2026-07-29-repoproof-implementation.md`。
 - **实现台账**：根目录 `PLAN.md` 用实际 Git feature commit 记录已完成的 Task 1–14；
-  Task 14 的证据为 `817c91b`，Task 15 仍待执行。
+  Task 14 的证据为 `817c91b`。Task 15 正在执行，本地版本源与安装后 CLI/元数据已
+  对齐到 `1.0.0`，但不提前标记完成。
 - **已确认澄清**：助教允许 CLI + GitHub Release，因此不实现 WebUI；核心审计不用
   LLM 或付费 API；PLAN commit 证据由 `markdown_sections` 的可选检查承载，不新增
   第七种规则；Secret allowlist 不保存原文，`manual_checks` 不伪装成自动结论。
-- **本地验证**：Task 14 的 RED、GREEN、离线自审、Ruff、mypy、`git diff --check`
-  和 Makefile `verify` 目标的等价直接命令结果记录在 `AGENT_LOG.md`。当前环境没有
-  `make`，因此不把该命令表述为已执行；这些均为本地证据，不是托管 CI。
+- **本地验证**：Task 14 的完整本地结果与 Task 15 的版本一致性 RED/GREEN、Ruff、
+  mypy、`git diff --check` 记录在 `AGENT_LOG.md`。当前环境没有 `make`，因此不把
+  该命令表述为已执行；Task 15 当前仅为最小发布候选门禁，这些均为本地证据，不是
+  托管 CI。
 - **PR / 托管 CI / Release**：截至此文档更新时均为 pending。远程 `origin` 只记录
   `main`；尚未创建 implementation branch 的 PR，尚无可链接的托管 CI run，未创建
   `v1.0.0` tag、GitHub Release 或可下载 Windows 资产。Task 15 必须在真实外部动作

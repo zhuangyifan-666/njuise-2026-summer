@@ -1,10 +1,22 @@
 from collections.abc import Mapping, Sequence
+from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from typer.testing import CliRunner
+
+from repoproof.cli import app
 
 ROOT = Path(__file__).parents[2]
+
+
+def test_installed_cli_reports_release_version() -> None:
+    result = CliRunner().invoke(app, ["version"], color=False)
+
+    assert result.exit_code == 0
+    assert installed_version("repoproof") == "1.0.0"
+    assert result.stdout == "repoproof 1.0.0\n"
 
 
 def _load_yaml(path: Path) -> Mapping[str, Any]:

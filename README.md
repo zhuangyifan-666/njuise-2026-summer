@@ -54,8 +54,9 @@ Authenticode 签名，Windows SmartScreen 可能显示警告；核对校验和�
 运行。也可以按“安装”中的方式从源码运行。具体 PowerShell 校验步骤见
 [`RELEASE.md`](RELEASE.md)。
 
-当前仓库包含生成该资产的 tag 触发 Release workflow；尚未创建发布 tag、GitHub
-Release 或托管构建结果。
+当前源码版本已更新为 `1.0.0` 发布候选，并包含生成该资产的 tag 触发 Release
+workflow；尚未创建发布 tag、GitHub Release 或托管构建结果。真实下载链接与校验
+证据将在托管 CI 完成后补充，不以本地候选状态替代。
 
 ## 目录结构
 
